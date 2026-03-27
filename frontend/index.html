@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>McQueen Tracker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <link href="style.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/airbnb.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+</head>
+<body>
+
+<!-- ══════════════ LOGIN PAGE ══════════════ -->
+<div id="loginPage" class="login-overlay">
+  <div class="login-card">
+    <div class="login-logo">McQueen</div>
+    <p class="text-muted small mb-3 text-center">Войдите в систему</p>
+    <div class="mb-2">
+      <input type="text" class="form-control" id="loginUsername" placeholder="Логин" autocomplete="username" />
+    </div>
+    <div class="mb-3">
+      <input type="password" class="form-control" id="loginPassword" placeholder="Пароль" autocomplete="current-password" />
+    </div>
+    <div id="loginError" class="alert alert-danger py-2 small d-none"></div>
+    <button class="btn btn-primary w-100" onclick="App.Auth.login()">
+      <i class="bi bi-box-arrow-in-right me-1"></i>Войти
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════ MAIN APP ══════════════ -->
+<div id="mainApp" class="d-none">
+<div class="app-layout">
+
+<!-- SIDEBAR -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <span class="sidebar-logo">M</span>
+    <span class="sidebar-title">McQueen</span>
+  </div>
+
+  <!-- Notifications -->
+  <div class="sidebar-notifications position-relative" id="sidebarNotifs" onclick="App.Notifications.onClick()">
+    <i class="bi bi-bell"></i>
+    <span class="sidebar-notif-badge d-none" id="notifBadge">0</span>
+    <div id="notifDropdown" class="d-none position-absolute bg-white rounded-3 shadow-lg border" style="left:100%;top:-10px;width:280px;z-index:1050;max-height:300px;overflow-y:auto"></div>
+  </div>
+
+  <div class="sidebar-section-label">MANAGEMENT</div>
+  <nav>
+    <button class="nav-btn role-admin" data-section="pl">
+      <i class="bi bi-wallet2"></i><span>P&L Учёт</span>
+    </button>
+    <button class="nav-btn role-admin" data-section="users">
+      <i class="bi bi-people-fill"></i><span>Пользователи</span>
+    </button>
+    <button class="nav-btn role-admin" data-section="activitylog">
+      <i class="bi bi-clock-history"></i><span>Журнал действий</span>
+    </button>
+  </nav>
+
+  <div class="sidebar-section-label">TRAFFIC</div>
+  <nav id="navButtons">
+    <button class="nav-btn role-adminbuyer active" data-section="dashboard">
+      <i class="bi bi-grid-1x2"></i><span>Дашборд</span>
+    </button>
+    <button class="nav-btn role-adminbuyer" data-section="statistics">
+      <i class="bi bi-bar-chart-line"></i><span>Статистика</span>
+    </button>
+    <button class="nav-btn" data-section="deposits">
+      <i class="bi bi-cash-stack"></i><span>FD/RD</span>
+    </button>
+    <button class="nav-btn role-adminoperator" data-section="pending">
+      <i class="bi bi-hourglass-split"></i><span>Pending</span>
+      <span id="pendingSidebarBadge" class="sidebar-badge d-none"><span id="pendingSidebarCount">0</span></span>
+    </button>
+  </nav>
+
+  <div class="sidebar-section-label">СЛОВАРИ</div>
+  <nav>
+    <button class="nav-btn role-adminbuyer" data-section="dictionaries" data-dict-target="geos">
+      <i class="bi bi-globe2"></i><span>Гео</span>
+    </button>
+    <button class="nav-btn role-adminbuyer" data-section="dictionaries" data-dict-target="agents">
+      <i class="bi bi-people"></i><span>Агенты</span>
+    </button>
+    <button class="nav-btn role-adminbuyer" data-section="dictionaries" data-dict-target="creatives">
+      <i class="bi bi-layers"></i><span>Креативы</span>
+    </button>
+    <button class="nav-btn role-adminbuyer" data-section="dictionaries" data-dict-target="undefined">
+      <i class="bi bi-question-circle"></i><span>Нераспознанные</span>
+      <span id="undefinedBadge" class="sidebar-badge d-none"><span id="undefinedCount">0</span></span>
+    </button>
+    <button class="nav-btn role-adminbuyer" data-section="dictionaries" data-dict-target="patterns">
+      <i class="bi bi-regex"></i><span>Паттерны</span>
+    </button>
+  </nav>
+
+  <div class="sidebar-section-label">ИМПОРТ</div>
+  <nav>
+    <button class="nav-btn role-adminbuyer" data-section="imports" data-import-target="spend">
+      <i class="bi bi-currency-dollar"></i><span>FBtool спенды</span>
+    </button>
+    <button class="nav-btn role-adminbuyer" data-section="imports" data-import-target="chatterfy">
+      <i class="bi bi-chat-dots"></i><span>Chatterfy</span>
+    </button>
+  </nav>
+
+
+  <!-- User info at bottom -->
+  <div class="sidebar-user">
+    <div class="d-flex align-items-center gap-2">
+      <div class="sidebar-avatar"><i class="bi bi-person-fill"></i></div>
+      <div class="flex-grow-1" style="min-width:0">
+        <div class="fw-medium small text-truncate" id="userNameDisplay"></div>
+        <span class="badge" id="userRoleBadge" style="font-size:.6rem"></span>
+      </div>
+      <button class="btn-icon" onclick="App.Auth.logout()" title="Выйти"><i class="bi bi-box-arrow-right"></i></button>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN CONTENT -->
+<main class="main-content">
+<div class="content-area">
+
+  <!-- BREADCRUMBS -->
+  <nav class="breadcrumbs mb-3" id="breadcrumbs">
+    <span class="breadcrumb-item" id="bcSection">Дашборд</span>
+    <span class="breadcrumb-sep d-none" id="bcSep">/</span>
+    <span class="breadcrumb-item breadcrumb-sub d-none" id="bcSub"></span>
+  </nav>
+
+  <!-- ══════════════ DICTIONARIES ══════════════ -->
+  <div id="section-dictionaries" class="section-panel d-none">
+    <ul class="nav nav-pills mb-3" id="dictTab">
+      <li class="nav-item"><button class="nav-link active" data-dict="geos"><i class="bi bi-globe2 me-1"></i>Гео</button></li>
+      <li class="nav-item"><button class="nav-link" data-dict="agents"><i class="bi bi-people me-1"></i>Агенты</button></li>
+      <li class="nav-item"><button class="nav-link" data-dict="creatives"><i class="bi bi-layers me-1"></i>Креативы</button></li>
+      <li class="nav-item"><button class="nav-link" data-dict="undefined"><i class="bi bi-question-circle me-1"></i>Неопределённые</button></li>
+      <li class="nav-item"><button class="nav-link" data-dict="patterns"><i class="bi bi-regex me-1"></i>Паттерны</button></li>
+    </ul>
+
+    <div id="dict-geos">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0 text-muted">Гео</h6>
+        <div class="d-flex gap-2">
+          <input type="text" class="form-control form-control-sm" style="width:160px" placeholder="Поиск..." oninput="document.querySelectorAll('#geoTbody tr').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')">
+          <button class="btn btn-sm btn-primary" onclick="App.Geos.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover crm-table" id="geoTable">
+          <thead><tr>
+            <th style="width:30px"><input type="checkbox" class="form-check-input" id="geoCheckAll" onchange="App.Geos.toggleAll(this.checked)"></th>
+            <th class="sortable" data-key="name">Название</th>
+            <th class="sortable" data-key="abbreviation">Аббревиатура</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="geoTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="dict-agents" class="d-none">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0 text-muted">Агенты</h6>
+        <div class="d-flex gap-2">
+          <input type="text" class="form-control form-control-sm" style="width:160px" placeholder="Поиск..." oninput="document.querySelectorAll('#agentTbody tr').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')">
+          <button class="btn btn-sm btn-primary" onclick="App.Agents.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover crm-table" id="agentTable">
+          <thead><tr>
+            <th style="width:30px"><input type="checkbox" class="form-check-input" id="agentCheckAll" onchange="App.Agents.toggleAll(this.checked)"></th>
+            <th class="sortable" data-key="name">Название</th>
+            <th class="sortable" data-key="abbreviation">Аббр.</th>
+            <th class="sortable text-end" data-key="current_commission">% комиссии</th>
+            <th>Дата изм.</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="agentTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="dict-creatives" class="d-none">
+      <div class="d-flex gap-2 justify-content-between align-items-center mb-2">
+        <div class="d-flex gap-2 align-items-center">
+          <h6 class="mb-0 text-muted">Креативы</h6>
+          <input type="text" class="form-control form-control-sm" style="width:160px" placeholder="Поиск..." oninput="document.querySelectorAll('#creativeTbody tr, #dict-creatives .creative-card').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')">
+          <select class="form-select form-select-sm w-auto" id="creativeGeoFilter" onchange="App.Creatives.load()">
+            <option value="">Все гео</option>
+          </select>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="App.Creatives.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
+      </div>
+      <div id="creativesContainer"></div>
+    </div>
+
+    <div id="dict-undefined" class="d-none">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0 text-muted">Неопределённые адсеты</h6>
+        <button class="btn btn-sm btn-outline-secondary" onclick="App.Undefined.load()"><i class="bi bi-arrow-clockwise me-1"></i>Обновить</button>
+      </div>
+      <div class="alert alert-warning py-2 small"><i class="bi bi-info-circle me-1"></i>Адсеты без определённого гео или агента. Привяжите их вручную.</div>
+      <!-- Bulk assign toolbar -->
+      <div id="bulkAssignBar" class="d-none alert alert-info py-2 d-flex flex-wrap align-items-center gap-2 mb-2" style="border:1px solid #93c5fd">
+        <span class="fw-semibold small"><i class="bi bi-check2-square me-1"></i>Выбрано: <span id="bulkSelectedCount">0</span></span>
+        <select class="form-select form-select-sm" style="width:160px" id="bulkGeoSelect"><option value="">Назначить гео...</option></select>
+        <button class="btn btn-sm btn-outline-primary" onclick="App.Undefined.bulkAssign('geo_id')"><i class="bi bi-globe2 me-1"></i>Гео</button>
+        <select class="form-select form-select-sm" style="width:160px" id="bulkAgentSelect"><option value="">Назначить агента...</option></select>
+        <button class="btn btn-sm btn-outline-primary" onclick="App.Undefined.bulkAssign('agent_id')"><i class="bi bi-people me-1"></i>Агент</button>
+        <select class="form-select form-select-sm" style="width:160px" id="bulkCreativeSelect"><option value="">Назначить креатив...</option></select>
+        <button class="btn btn-sm btn-outline-primary" onclick="App.Undefined.bulkAssign('creative_id')"><i class="bi bi-layers me-1"></i>Креатив</button>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="App.Undefined.bulkSelectSimilar()"><i class="bi bi-regex me-1"></i>Похожие</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover crm-table" id="undefinedTable">
+          <thead><tr>
+            <th style="width:30px"><input type="checkbox" class="form-check-input" id="undefinedCheckAll" onchange="App.Undefined.toggleAll(this.checked)"></th>
+            <th>Адсет</th><th>Гео</th><th>Агент</th><th>Креатив</th><th></th>
+          </tr></thead>
+          <tbody id="undefinedTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="dict-patterns" class="d-none">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <h6 class="mb-0 text-muted">Паттерны распознавания адсетов</h6>
+          <p class="text-muted small mb-0">Regex-правила для автоматического определения Гео и Агентства из имени адсета при импорте</p>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-warning" onclick="App.Patterns.reParse()"><i class="bi bi-arrow-repeat me-1"></i>Обновить словарь</button>
+          <button class="btn btn-sm btn-primary" onclick="App.Patterns.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить паттерн</button>
+        </div>
+      </div>
+      <!-- Test pattern -->
+      <div class="card mb-3">
+        <div class="card-body py-2">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-bug text-muted"></i>
+            <input type="text" class="form-control form-control-sm" id="patternTestInput" placeholder="Введите имя адсета для теста (напр. AR2cdn213B1L1GenMY5)" style="max-width:400px" onkeydown="if(event.key==='Enter')App.Patterns.testPattern()" />
+            <button class="btn btn-sm btn-outline-primary" onclick="App.Patterns.testPattern()">Тест</button>
+            <span id="patternTestResult"></span>
+          </div>
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-globe2 me-1 text-info"></i>Паттерны Гео</div>
+            <div class="card-body p-2" id="patternsGeoList"></div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-people me-1 text-warning"></i>Паттерны Агентств</div>
+            <div class="card-body p-2" id="patternsAgentList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ STATISTICS ══════════════ -->
+  <div id="section-statistics" class="section-panel d-none">
+    <!-- Row 1: tabs + mode toggle -->
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+      <ul class="nav nav-pills" id="statsTab">
+        <li class="nav-item"><button class="nav-link active" data-stats="creatives"><i class="bi bi-layers me-1"></i>Крео</button></li>
+        <li class="nav-item"><button class="nav-link" data-stats="geos"><i class="bi bi-globe2 me-1"></i>Гео</button></li>
+        <li class="nav-item"><button class="nav-link" data-stats="agents"><i class="bi bi-people me-1"></i>Агенты</button></li>
+      </ul>
+      <div class="btn-group btn-group-sm ms-auto" id="statsModeGroup">
+        <button class="btn btn-outline-secondary active" id="statsModeRange" onclick="App.Stats.setMode('range')">
+          <i class="bi bi-calendar-range me-1"></i>Период
+        </button>
+        <button class="btn btn-outline-secondary" id="statsModeCompare" onclick="App.Stats.setMode('compare')">
+          <i class="bi bi-layout-split me-1"></i>Сравнение
+        </button>
+      </div>
+    </div>
+
+    <!-- Row 2: date shortcuts + filters -->
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+
+      <!-- Shortcuts -->
+      <div id="statsShortcuts" class="d-flex gap-1 flex-wrap">
+        <span class="date-shortcut" onclick="App.Stats.shortcut('today')">Сегодня</span>
+        <span class="date-shortcut" onclick="App.Stats.shortcut('yesterday')">Вчера</span>
+        <span class="date-shortcut" onclick="App.Stats.shortcut('week')">Неделя</span>
+        <span class="date-shortcut" onclick="App.Stats.shortcut('month')">Месяц</span>
+        <span class="date-shortcut" onclick="App.Stats.shortcut('prevmonth')">Пр. месяц</span>
+      </div>
+
+      <!-- Range mode: from–to + geo -->
+      <div id="statsFilterRange" class="d-flex gap-2 align-items-center flex-wrap">
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsFrom" onchange="App.Stats.load()" title="С" />
+        <span class="text-muted small">—</span>
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsTo" onchange="App.Stats.load()" title="По" />
+        <select class="form-select form-select-sm w-auto" id="statsGeoFilter" title="Фильтр по гео">
+          <option value="">Все гео</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="App.Stats.applyFilters()" id="statsApplyBtn">
+          <i class="bi bi-check2 me-1"></i>Применить
+        </button>
+      </div>
+
+      <!-- Compare mode -->
+      <div id="statsFilterCompare" class="d-flex gap-2 align-items-center flex-wrap d-none">
+        <span class="badge period-a">A</span>
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpFromA" title="Период A — с" />
+        <span class="text-muted small">—</span>
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpToA" title="по" />
+        <span class="badge period-b">B</span>
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpFromB" title="Период B — с" />
+        <span class="text-muted small">—</span>
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpToB" title="по" />
+        <button class="btn btn-sm btn-outline-primary" onclick="App.Stats.load()"><i class="bi bi-layout-split"></i> Сравнить</button>
+      </div>
+
+      <button class="btn btn-sm btn-outline-secondary" onclick="App.Stats.clearFilters()"><i class="bi bi-x-lg"></i></button>
+    </div>
+
+    <!-- Advanced Filters -->
+    <div class="mb-2">
+      <a href="#" class="small text-muted text-decoration-none" onclick="document.getElementById('statsAdvFilters').classList.toggle('d-none');return false">
+        <i class="bi bi-funnel me-1"></i>Расширенные фильтры
+      </a>
+      <div id="statsAdvFilters" class="d-none mt-2 d-flex flex-wrap gap-2 align-items-center p-2 rounded" style="background:var(--bg-hover)">
+        <input type="text" class="form-control form-control-sm" style="width:180px" id="statsAdsetFilter" placeholder="Поиск по названию..." />
+        <select class="form-select form-select-sm" style="width:150px" id="statsAgentFilter">
+          <option value="">Все агенты</option>
+        </select>
+        <input type="number" class="form-control form-control-sm" style="width:110px" id="statsMinSpend" placeholder="Мин спенд $" />
+        <input type="number" class="form-control form-control-sm" style="width:110px" id="statsMaxSpend" placeholder="Макс спенд $" />
+        <input type="number" class="form-control form-control-sm" style="width:90px" id="statsMinROI" placeholder="Мин ROI%" />
+        <input type="number" class="form-control form-control-sm" style="width:90px" id="statsMaxROI" placeholder="Макс ROI%" />
+        <button class="btn btn-sm btn-outline-secondary" onclick="['statsAdsetFilter','statsAgentFilter','statsMinSpend','statsMaxSpend','statsMinROI','statsMaxROI'].forEach(id=>{const e=document.getElementById(id);if(e)e.value=''});App.Stats.render(App.Stats.data)">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- View Toggle + Charts -->
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="btn-group btn-group-sm">
+        <button class="btn btn-outline-primary active" id="statsViewBoth" onclick="App.Stats.setView('both')"><i class="bi bi-layout-split me-1"></i>Все</button>
+        <button class="btn btn-outline-primary" id="statsViewCharts" onclick="App.Stats.setView('charts')"><i class="bi bi-bar-chart me-1"></i>Графики</button>
+        <button class="btn btn-outline-primary" id="statsViewTable" onclick="App.Stats.setView('table')"><i class="bi bi-table me-1"></i>Таблица</button>
+      </div>
+      <button class="btn btn-sm btn-outline-secondary" onclick="App.Export.toCSV('statsTable','statistics')"><i class="bi bi-download me-1"></i>CSV</button>
+      <label class="form-check form-check-inline small ms-3 mb-0 user-select-none">
+        <input type="checkbox" class="form-check-input" id="statsShowZeros" onchange="App.Stats.render(App.Stats.data)">
+        <span class="form-check-label text-muted">Показывать с нулями</span>
+      </label>
+    </div>
+
+    <div class="row g-3 mb-3" id="statsCharts">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header py-2 small fw-semibold"><i class="bi bi-bar-chart me-1"></i>Top 10 по профиту</div>
+          <div class="card-body p-2" id="statsBarChart" style="min-height:260px"></div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header py-2 small fw-semibold"><i class="bi bi-pie-chart me-1"></i>Распределение спенда</div>
+          <div class="card-body p-2" id="statsDonutChart" style="min-height:260px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="statsContent"></div>
+  </div>
+
+  <!-- ══════════════ PENDING (operator) ══════════════ -->
+  <div id="section-pending" class="section-panel d-none">
+    <div class="card border-warning">
+      <div class="card-header py-2 fw-semibold d-flex align-items-center gap-2 bg-warning bg-opacity-10">
+        <i class="bi bi-hourglass-split text-warning"></i>Ожидают подтверждения
+        <span class="badge bg-warning text-dark ms-1" id="pendingCount">0</span>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="App.Deposits.loadPending()"><i class="bi bi-arrow-clockwise"></i></button>
+      </div>
+      <div class="card-body p-0" id="pendingList" style="max-height:calc(100vh - 200px);overflow-y:auto">
+        <p class="text-muted small text-center py-3">Нет ожидающих</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ DEPOSITS ══════════════ -->
+  <div id="section-deposits" class="section-panel d-none">
+
+    <!-- OPERATOR UI: adset list with quick-add -->
+    <div id="operatorDepositUI" class="d-none">
+      <div class="row g-3">
+        <div class="col-lg-5">
+          <div class="card">
+            <div class="card-header py-2 fw-semibold d-flex align-items-center gap-2">
+              <i class="bi bi-lightning-charge text-warning"></i>Быстрый ввод
+              <div class="ms-auto d-flex gap-2">
+                <select class="form-select form-select-sm w-auto" id="opGeoFilter" onchange="App.Deposits.operatorLoadAdsets()">
+                  <option value="">— гео —</option>
+                </select>
+                <input type="date" class="form-control form-control-sm w-auto" id="opDate" />
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div class="px-3 py-2 border-bottom">
+                <input type="text" class="form-control form-control-sm" id="opSearch" placeholder="Поиск по адсету..." oninput="App.Deposits.filterAdsets()" />
+              </div>
+              <div id="opAdsetList" style="max-height:460px;overflow-y:auto">
+                <p class="text-muted small text-center py-3">Выберите гео</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-7">
+          <div class="d-flex gap-2 align-items-center mb-2">
+            <h6 class="mb-0 text-muted"><i class="bi bi-clock-history me-1"></i>История депозитов</h6>
+            <select class="form-select form-select-sm w-auto ms-auto" id="opHistGeo" onchange="App.Deposits.loadHistory()">
+              <option value="">Все гео</option>
+            </select>
+            <input type="month" class="form-control form-control-sm w-auto" id="opHistMonth" onchange="App.Deposits.loadHistory()" />
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover crm-table">
+              <thead><tr>
+                <th>Дата</th><th>Адсет</th><th>Гео</th><th>Тип</th>
+                <th class="text-end">Сумма $</th><th>Статус</th><th></th>
+              </tr></thead>
+              <tbody id="opHistTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN/BUYER UI: autocomplete deposit form -->
+    <div id="adminDepositUI" class="d-none">
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <div class="card">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-plus-circle me-1 text-primary"></i>Новый депозит</div>
+            <div class="card-body">
+              <div class="mb-2">
+                <label class="form-label small fw-medium">Адсет</label>
+                <input type="text" class="form-control form-control-sm" id="depAdsetInput"
+                  list="adsetDatalist" placeholder="Начните вводить название адсета..."
+                  autocomplete="off" oninput="App.Deposits.onAdsetInput()" />
+                <datalist id="adsetDatalist"></datalist>
+                <div class="text-danger small mt-1 d-none" id="depAdsetError"></div>
+              </div>
+              <div class="mb-2">
+                <label class="form-label small fw-medium">Гео</label>
+                <input type="text" class="form-control form-control-sm" id="depGeoDisplay" readonly placeholder="определяется автоматически" />
+              </div>
+              <div class="mb-2">
+                <label class="form-label small fw-medium">Креатив</label>
+                <input type="text" class="form-control form-control-sm" id="depCreative" readonly placeholder="определяется автоматически" />
+              </div>
+              <div class="mb-2">
+                <label class="form-label small fw-medium">Дата</label>
+                <input type="date" class="form-control form-control-sm" id="depDate" />
+              </div>
+              <div class="mb-2">
+                <label class="form-label small fw-medium">Тип</label>
+                <select class="form-select form-select-sm" id="depType">
+                  <option value="dep">FD</option>
+                  <option value="redep">RD</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small fw-medium">Сумма $</label>
+                <input type="number" class="form-control form-control-sm" id="depAmount" placeholder="0.00" step="0.01" min="0" />
+              </div>
+              <input type="hidden" id="depAdsetId" />
+              <div class="d-flex gap-2">
+                <button class="btn btn-primary btn-sm flex-fill" onclick="App.Deposits.save()">
+                  <i class="bi bi-check-lg me-1"></i>Сохранить</button>
+                <button class="btn btn-warning btn-sm flex-fill" onclick="App.Deposits.sendPending()" title="Отправить оператору на подтверждение (без суммы)">
+                  <i class="bi bi-hourglass-split me-1"></i>Pending
+              </button>
+            </div>
+            <div id="buyerPendingHint" class="d-none small text-muted mt-2">
+              <i class="bi bi-info-circle me-1"></i>Сумму заполнит оператор после подтверждения
+            </div>
+          </div>
+        </div>
+        </div>
+        <div class="col-lg-8">
+          <div class="d-flex gap-2 align-items-center mb-2">
+            <h6 class="mb-0 text-muted">История депозитов</h6>
+            <button class="btn btn-sm btn-outline-secondary" onclick="App.Export.toCSV('depHistTbody','deposits')" title="Экспорт CSV"><i class="bi bi-download"></i></button>
+            <select class="form-select form-select-sm w-auto ms-auto" id="depHistGeo" onchange="App.Deposits.loadHistory()">
+              <option value="">Все гео</option>
+            </select>
+            <input type="month" class="form-control form-control-sm w-auto" id="depHistMonth" onchange="App.Deposits.loadHistory()" />
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover crm-table">
+              <thead><tr>
+                <th>Дата</th><th>Адсет</th><th>Крео</th><th>Гео</th><th>Тип</th>
+                <th class="text-end">Сумма $</th><th>Статус</th><th>Агент</th><th></th>
+              </tr></thead>
+              <tbody id="depHistTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ IMPORT ══════════════ -->
+  <div id="section-imports" class="section-panel d-none">
+    <ul class="nav nav-pills mb-3" id="importTab">
+      <li class="nav-item"><button class="nav-link active" data-import="spend"><i class="bi bi-currency-dollar me-1"></i>Спенды</button></li>
+      <li class="nav-item"><button class="nav-link" data-import="chatterfy"><i class="bi bi-chat-dots me-1"></i>Chatterfy</button></li>
+      <li class="nav-item"><button class="nav-link" data-import="cabinets"><i class="bi bi-hdd-network me-1"></i>Кабинеты</button></li>
+    </ul>
+
+    <div id="import-spend">
+      <div class="row g-3">
+        <div class="col-lg-5">
+          <div class="card">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-upload me-1 text-primary"></i>Загрузить спенды</div>
+            <div class="card-body">
+              <div class="mb-2">
+                <label class="form-label small">Кабинет</label>
+                <select class="form-select form-select-sm" id="spendCabinet"><option value="">Без кабинета</option></select>
+              </div>
+              <div class="mb-2">
+                <label class="form-label small">Дата</label>
+                <input type="date" class="form-control form-control-sm" id="spendDate" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label small d-flex justify-content-between">Данные<span class="text-muted">адсет TAB сумма</span></label>
+                <textarea class="form-control form-control-sm font-monospace" id="spendData" rows="10"
+                  placeholder="BRhan202B1L1MoodyV2A1&#9;150.50&#10;ARhan202B2L1MoodyV2A2&#9;89.20"></textarea>
+              </div>
+              <button class="btn btn-primary btn-sm w-100" onclick="App.Import.processSpend()"><i class="bi bi-lightning me-1"></i>Обработать</button>
+            </div>
+          </div>
+          <!-- FB API Import -->
+          <div class="card mt-3">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-facebook me-1 text-primary"></i>Импорт из Facebook API</div>
+            <div class="card-body">
+              <div class="mb-2">
+                <label class="form-label small">Кабинет</label>
+                <select class="form-select form-select-sm" id="fbCabinet"></select>
+              </div>
+              <div class="mb-2 d-flex gap-2">
+                <div class="flex-fill"><label class="form-label small">С</label>
+                  <input type="date" class="form-control form-control-sm" id="fbDateFrom" /></div>
+                <div class="flex-fill"><label class="form-label small">По</label>
+                  <input type="date" class="form-control form-control-sm" id="fbDateTo" /></div>
+              </div>
+              <button class="btn btn-outline-primary btn-sm w-100" id="fbImportBtn" onclick="App.Import.importFromFB()">
+                <i class="bi bi-cloud-download me-1"></i>Загрузить из FB API
+              </button>
+            </div>
+          </div>
+          <!-- FBTool.pro Import -->
+          <div class="card mt-3">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-tools me-1 text-warning"></i>Импорт из FBTool.pro</div>
+            <div class="card-body">
+              <div class="mb-2">
+                <label class="form-label small">API Key</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolApiKey" placeholder="kV8jecAeAL..." />
+              </div>
+              <div class="mb-2">
+                <label class="form-label small">ID аккаунтов (через запятую)</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolAccounts" placeholder="18850199, 18865827, ..." />
+              </div>
+              <div class="mb-2 d-flex gap-2">
+                <div class="flex-fill"><label class="form-label small">С</label>
+                  <input type="date" class="form-control form-control-sm" id="fbtoolDateFrom" /></div>
+                <div class="flex-fill"><label class="form-label small">По</label>
+                  <input type="date" class="form-control form-control-sm" id="fbtoolDateTo" /></div>
+              </div>
+              <button class="btn btn-outline-warning btn-sm w-100" id="fbtoolImportBtn" onclick="App.Import.importFromFBTool()">
+                <i class="bi bi-cloud-download me-1"></i>Загрузить из FBTool.pro
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-7">
+          <div class="d-flex gap-2 align-items-center mb-2">
+            <h6 class="mb-0 text-muted">История спендов</h6>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="App.Export.toCSV('spendHistTbody','spend-export')"><i class="bi bi-download"></i></button>
+            <input type="month" class="form-control form-control-sm w-auto" id="spendHistMonth" onchange="App.Import.loadSpendHistory()" />
+            <button class="btn btn-sm btn-outline-danger ms-2" onclick="App.Import.bulkDeleteSpend()" title="Удалить за период"><i class="bi bi-trash me-1"></i>За период</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover crm-table">
+              <thead><tr><th>Дата</th><th>Адсет</th><th>Крео</th><th>Гео</th><th class="text-end">Сумма</th><th></th></tr></thead>
+              <tbody id="spendHistTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="import-chatterfy" class="d-none">
+      <div class="row g-3">
+        <div class="col-lg-5">
+          <div class="card">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-clipboard-data me-1 text-primary"></i>Импорт Chatterfy</div>
+            <div class="card-body">
+              <div class="mb-2">
+                <label class="form-label small">Дата</label>
+                <input type="date" class="form-control form-control-sm" id="chatterfyDate" />
+              </div>
+              <div class="mb-2">
+                <label class="form-label small">Загрузить .csv файл из Chatterfy</label>
+                <input type="file" class="form-control form-control-sm" id="chatterfyFile" accept=".csv" onchange="App.Import.onCSVFile()" />
+                <div class="text-muted small mt-1">Или вставьте данные вручную ниже</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label small d-flex justify-content-between">Ручной ввод<span class="text-muted">адсет | Sub | Dia | Reg | FD | RD</span></label>
+                <textarea class="form-control form-control-sm font-monospace" id="chatterfyData" rows="8"
+                  placeholder="BRhan202B1	5	20	10	3	1&#10;ARhan202B2	8	30	15	5	2"></textarea>
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="chatterfyReplaceDups" />
+                <label class="form-check-label small" for="chatterfyReplaceDups">Заменить дубли (если дата+адсет уже импортированы)</label>
+              </div>
+              <button class="btn btn-primary btn-sm w-100" onclick="App.Import.processChatterfy()"><i class="bi bi-lightning me-1"></i>Обработать</button>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-7">
+          <div class="d-flex gap-2 align-items-center mb-2">
+            <h6 class="mb-0 text-muted">История Chatterfy</h6>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="App.Export.toCSV('chatterfyHistTbody','chatterfy-export')"><i class="bi bi-download"></i></button>
+            <input type="month" class="form-control form-control-sm w-auto" id="chatterfyHistMonth" onchange="App.Import.loadChatterfyHistory()" />
+            <button class="btn btn-sm btn-outline-danger ms-2" onclick="App.Import.bulkDeleteChatterfy()" title="Удалить за период"><i class="bi bi-trash me-1"></i>За период</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover crm-table">
+              <thead><tr>
+                <th>Дата</th><th>Адсет</th>
+                <th class="text-end">Sub</th><th class="text-end">Dia</th>
+                <th class="text-end">Reg</th><th class="text-end">FD</th><th class="text-end">RD</th><th></th>
+              </tr></thead>
+              <tbody id="chatterfyHistTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="import-cabinets" class="d-none">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0 text-muted">FB Кабинеты</h6>
+        <button class="btn btn-sm btn-primary" onclick="App.Cabinets.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover crm-table">
+          <thead><tr><th>Название</th><th>Account ID</th><th>Токен</th><th></th></tr></thead>
+          <tbody id="cabinetTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ DASHBOARD ══════════════ -->
+  <div id="section-dashboard" class="section-panel d-none">
+    <ul class="nav nav-pills mb-3" id="dashTab">
+      <li class="nav-item"><button class="nav-link active" data-dash="summary"><i class="bi bi-grid me-1"></i>Сводка</button></li>
+      <li class="nav-item"><button class="nav-link" data-dash="buyers"><i class="bi bi-people me-1"></i>По баерам</button></li>
+      <li class="nav-item"><button class="nav-link" data-dash="operators"><i class="bi bi-person-workspace me-1"></i>По операторам</button></li>
+    </ul>
+
+    <!-- Summary -->
+    <div id="dash-summary">
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+        <div id="dashShortcuts" class="d-flex gap-1 flex-wrap">
+          <span class="date-shortcut" onclick="App.Dashboard.shortcut('today')">Сегодня</span>
+          <span class="date-shortcut" onclick="App.Dashboard.shortcut('yesterday')">Вчера</span>
+          <span class="date-shortcut" onclick="App.Dashboard.shortcut('week')">Неделя</span>
+          <span class="date-shortcut" onclick="App.Dashboard.shortcut('month')">Месяц</span>
+          <span class="date-shortcut" onclick="App.Dashboard.shortcut('prevmonth')">Пр. месяц</span>
+        </div>
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="dashFrom" />
+        <span class="text-muted small">—</span>
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="dashTo" />
+        <button class="btn btn-sm btn-primary" onclick="App.Dashboard.load()" id="dashApplyBtn">
+          <i class="bi bi-check2 me-1"></i>Применить
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="App.Dashboard.clearFilter()"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="row g-3" id="summaryCards"></div>
+      <div class="card mt-3">
+        <div class="card-body">
+          <h6 class="fw-semibold mb-3"><i class="bi bi-funnel me-2"></i>Воронка конверсии</h6>
+          <div id="dashFunnel"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Buyers -->
+    <div id="dash-buyers" class="d-none">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover crm-table">
+          <thead><tr>
+            <th>Баер</th><th title="Агентство предоставляет аккаунты (расходник)">Агентство <i class="bi bi-info-circle" style="font-size:.65rem;opacity:.5"></i></th>
+            <th class="text-end">Адсетов</th>
+            <th class="text-end">Спенд $</th>
+            <th class="text-end">FD</th>
+            <th class="text-end">RD</th>
+            <th class="text-end">Сумма $</th>
+            <th class="text-end">± $</th>
+            <th class="text-end">ROI %</th>
+          </tr></thead>
+          <tbody id="buyersTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Operators -->
+    <div id="dash-operators" class="d-none">
+      <div class="table-responsive" style="max-width:600px">
+        <table class="table table-sm table-hover crm-table">
+          <thead><tr>
+            <th>Оператор</th>
+            <th class="text-end">FD</th>
+            <th class="text-end">RD</th>
+            <th class="text-end">Сумма $</th>
+          </tr></thead>
+          <tbody id="operatorsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ USERS ══════════════ -->
+  <div id="section-users" class="section-panel d-none">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0 text-muted">Пользователи системы</h6>
+      <button class="btn btn-sm btn-primary" onclick="App.Users.openAdd()"><i class="bi bi-person-plus me-1"></i>Добавить</button>
+    </div>
+    <div class="table-responsive" style="max-width:700px">
+      <table class="table table-sm table-hover crm-table">
+        <thead><tr>
+          <th>Логин</th><th>Роль</th><th>Создан</th><th></th>
+        </tr></thead>
+        <tbody id="usersTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════ P&L (standalone section) ══════════════ -->
+  <div id="section-pl" class="section-panel d-none">
+    <ul class="nav nav-pills mb-3" id="plTab">
+      <li class="nav-item"><button class="nav-link active" data-pltab="records" onclick="App.PL.switchTab('records')"><i class="bi bi-wallet2 me-1"></i>P&L</button></li>
+      <li class="nav-item"><button class="nav-link" data-pltab="categories" onclick="App.PL.switchTab('categories')"><i class="bi bi-tags me-1"></i>Категории</button></li>
+      <li class="nav-item"><button class="nav-link" data-pltab="analytics" onclick="App.PL.switchTab('analytics')">Аналитика</button></li>
+    </ul>
+
+    <!-- P&L Records -->
+    <div id="pl-records">
+      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+        <div class="d-flex gap-1" id="plShortcuts">
+          <span class="date-shortcut" onclick="App.Dashboard.plShortcut('today')">Сегодня</span>
+          <span class="date-shortcut" onclick="App.Dashboard.plShortcut('yesterday')">Вчера</span>
+          <span class="date-shortcut" onclick="App.Dashboard.plShortcut('week')">Неделя</span>
+          <span class="date-shortcut active" onclick="App.Dashboard.plShortcut('month')">Месяц</span>
+          <span class="date-shortcut" onclick="App.Dashboard.plShortcut('prevmonth')">Пр. месяц</span>
+          <button class="btn btn-sm btn-outline-secondary ms-2" onclick="App.Dashboard.plCompare()" title="Сравнить с предыдущим периодом"><i class="bi bi-layout-split me-1"></i>Сравнить</button>
+        </div>
+        <input type="date" class="form-control form-control-sm w-auto" id="plFrom" onchange="App.Dashboard.loadPL()" title="С" />
+        <span class="text-muted small">—</span>
+        <input type="date" class="form-control form-control-sm w-auto" id="plTo" onchange="App.Dashboard.loadPL()" title="По" />
+        <button class="btn btn-sm btn-primary ms-auto" onclick="App.Expenses.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="App.Export.toCSV('plEntriesTbody','pl-export')"><i class="bi bi-download"></i></button>
+      </div>
+      <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+        <div class="d-flex gap-1">
+          <button class="btn btn-sm btn-outline-secondary pl-filter-btn active" data-filter="all" onclick="App.Dashboard.filterPL('all')">Все</button>
+          <button class="btn btn-sm btn-outline-danger pl-filter-btn" data-filter="expense" onclick="App.Dashboard.filterPL('expense')">Расходы</button>
+          <button class="btn btn-sm btn-outline-success pl-filter-btn" data-filter="income" onclick="App.Dashboard.filterPL('income')">Доходы</button>
+        </div>
+        <select class="form-select form-select-sm w-auto" id="plCatFilter" onchange="App.Dashboard._updateUnitFilter();App.Dashboard.filterPL(App.Dashboard._plFilter)">
+          <option value="">Все категории</option>
+        </select>
+        <select class="form-select form-select-sm w-auto" id="plUnitFilter" onchange="App.Dashboard.filterPL(App.Dashboard._plFilter)">
+          <option value="">Все подстатьи</option>
+        </select>
+        <a href="#" class="small text-muted text-decoration-none ms-1" onclick="document.getElementById('plCatFilter').value='';document.getElementById('plUnitFilter').value='';App.Dashboard.filterPL(App.Dashboard._plFilter);return false"><i class="bi bi-x-circle"></i></a>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-md-4"><div class="metric-card" id="plCardIncome"></div></div>
+        <div class="col-md-4"><div class="metric-card" id="plCardExpense"></div></div>
+        <div class="col-md-4"><div class="metric-card" id="plCardNet"></div></div>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-lg-7"><div class="card"><div class="card-body p-2" id="plBarChart" style="min-height:260px"></div></div></div>
+        <div class="col-lg-5"><div class="card"><div class="card-body p-2" id="plDonutChart" style="min-height:260px"></div></div></div>
+      </div>
+      <div class="row g-3">
+        <div class="col-lg-3">
+          <div class="card">
+            <div class="card-header py-2 fw-semibold small"><i class="bi bi-pie-chart me-1"></i>По категориям</div>
+            <div class="card-body p-2" id="plCatBreakdown"></div>
+          </div>
+        </div>
+        <div class="col-lg-9">
+          <div class="card">
+            <div class="card-body p-0">
+              <div class="table-responsive" style="max-height:50vh">
+                <table class="table table-sm table-hover crm-table mb-0">
+                  <thead><tr><th>Дата</th><th>Тип</th><th>Категория</th><th>Подстатья</th><th class="text-end">Сумма $</th><th style="width:40px"></th></tr></thead>
+                  <tbody id="plEntriesTbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Categories -->
+    <div id="pl-categories" class="d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div><h6 class="mb-0">Категории расходов и доходов</h6><p class="text-muted small mb-0">Настройте категории и подстатьи для учёта P&L</p></div>
+        <button class="btn btn-sm btn-primary" onclick="App.ExpCat.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить категорию</button>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6"><div class="card"><div class="card-header py-2 fw-semibold text-danger"><i class="bi bi-arrow-up-circle me-1"></i>Расходы</div><div class="card-body p-2" id="expCatExpense"></div></div></div>
+        <div class="col-md-6"><div class="card"><div class="card-header py-2 fw-semibold text-success"><i class="bi bi-arrow-down-circle me-1"></i>Доходы</div><div class="card-body p-2" id="expCatIncome"></div></div></div>
+      </div>
+    </div>
+
+    <!-- Analytics -->
+    <div id="pl-analytics" class="d-none">
+      <div id="plAnalyticsContent"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════ ACTIVITY LOG ══════════════ -->
+  <div id="section-activitylog" class="section-panel d-none">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0 text-muted"><i class="bi bi-clock-history me-1"></i>Журнал действий</h6>
+      <button class="btn btn-sm btn-outline-secondary" onclick="App.ActivityLog.load()"><i class="bi bi-arrow-clockwise me-1"></i>Обновить</button>
+    </div>
+    <div id="activityLogContent">
+      <p class="text-muted text-center py-5">Загрузка...</p>
+    </div>
+  </div>
+
+<!-- ══════════════ MODALS ══════════════ -->
+
+<!-- GEO -->
+<div class="modal fade" id="geoModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="geoModalTitle">Гео</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="geoId" />
+        <div class="mb-2"><label class="form-label small">Название</label>
+          <input type="text" class="form-control form-control-sm" id="geoName" placeholder="Brazil" /></div>
+        <div class="mb-2"><label class="form-label small">Аббревиатура</label>
+          <input type="text" class="form-control form-control-sm" id="geoAbbr" placeholder="BR" maxlength="5" /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Geos.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AGENT -->
+<div class="modal fade" id="agentModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="agentModalTitle">Агент</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="agentId" />
+        <div class="mb-2"><label class="form-label small">Название</label>
+          <input type="text" class="form-control form-control-sm" id="agentName" placeholder="Han Agency" /></div>
+        <div class="mb-2"><label class="form-label small">Аббревиатура</label>
+          <input type="text" class="form-control form-control-sm" id="agentAbbr" placeholder="han" /></div>
+        <div class="mb-2"><label class="form-label small">% комиссии</label>
+          <input type="number" class="form-control form-control-sm" id="agentComm" placeholder="10" step="0.1" /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Agents.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- COMMISSION -->
+<div class="modal fade" id="commModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title">Изменить % комиссии</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="commAgentId" />
+        <p class="small text-muted">Новый % применяется только с указанной даты.</p>
+        <div class="mb-2"><label class="form-label small">Новый %</label>
+          <input type="number" class="form-control form-control-sm" id="commPct" step="0.1" /></div>
+        <div class="mb-2"><label class="form-label small">Дата изменения</label>
+          <input type="date" class="form-control form-control-sm" id="commDate" /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Agents.saveCommission()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CREATIVE -->
+<div class="modal fade" id="creativeModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="creativeModalTitle">Креатив</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="creativeId" />
+        <div class="mb-2"><label class="form-label small">Название</label>
+          <input type="text" class="form-control form-control-sm" id="creativeName" placeholder="MoodyV2" /></div>
+        <div class="mb-2"><label class="form-label small">Гео</label>
+          <select class="form-select form-select-sm" id="creativeGeoId"><option value="">Без гео</option></select></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Creatives.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADSET -->
+<div class="modal fade" id="adsetModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="adsetModalTitle">Адсет</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="adsetId" />
+        <div class="mb-2"><label class="form-label small">Название</label>
+          <input type="text" class="form-control form-control-sm" id="adsetName" placeholder="BRhan202B1L1MoodyV2A1" /></div>
+        <div class="mb-2"><label class="form-label small">Гео</label>
+          <select class="form-select form-select-sm" id="adsetGeoId"><option value="">Автоопределение</option></select></div>
+        <div class="mb-2"><label class="form-label small">Агент</label>
+          <select class="form-select form-select-sm" id="adsetAgentId"><option value="">Автоопределение</option></select></div>
+        <div class="mb-2"><label class="form-label small">Креатив</label>
+          <select class="form-select form-select-sm" id="adsetCreativeId"><option value="">Не привязан</option></select></div>
+        <div class="mb-2"><label class="form-label small">Баер</label>
+          <select class="form-select form-select-sm" id="adsetBuyerId"><option value="">Не назначен</option></select></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Adsets.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CABINET -->
+<div class="modal fade" id="cabinetModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="cabinetModalTitle">Кабинет</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="cabinetId" />
+        <div class="mb-2"><label class="form-label small">Название</label>
+          <input type="text" class="form-control form-control-sm" id="cabinetName" /></div>
+        <div class="mb-2"><label class="form-label small">Account ID</label>
+          <input type="text" class="form-control form-control-sm" id="cabinetAccountId" /></div>
+        <div class="mb-2"><label class="form-label small">Токен (опционально)</label>
+          <input type="text" class="form-control form-control-sm" id="cabinetToken" /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Cabinets.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- USER -->
+<div class="modal fade" id="userModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="userModalTitle">Пользователь</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="userId" />
+        <div class="mb-2"><label class="form-label small">Логин</label>
+          <input type="text" class="form-control form-control-sm" id="userUsername" /></div>
+        <div class="mb-2" id="userPassRow"><label class="form-label small">Пароль</label>
+          <input type="password" class="form-control form-control-sm" id="userPassword" /></div>
+        <div class="mb-2"><label class="form-label small">Роль</label>
+          <select class="form-select form-select-sm" id="userRole" onchange="App.Users.onRoleChange()">
+            <option value="operator">Operator — обработчик (ввод депозитов)</option>
+            <option value="buyer">Buyer — медиа баер (словари, импорт, статистика)</option>
+            <option value="admin">Admin — полный доступ</option>
+          </select>
+        </div>
+        <div class="mb-2" id="userGeoRow" style="display:none">
+          <label class="form-label small fw-medium">Гео оператора <span class="text-muted fw-normal">(удерж. Ctrl для мультивыбора)</span></label>
+          <select multiple class="form-select form-select-sm" id="userGeos" style="min-height:90px"></select>
+          <div class="text-muted small mt-1"><i class="bi bi-info-circle me-1"></i>Видит pending и адсеты только этих гео</div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Users.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- QUICK DEPOSIT MODAL (operator) -->
+<div class="modal fade" id="quickDepModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title">Добавить <span id="qdType"></span></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="qdAdsetId" />
+        <input type="hidden" id="qdAdsetRowId" />
+        <p class="small text-muted mb-1" id="qdAdsetName"></p>
+        <div class="mb-2"><label class="form-label small">Сумма $</label>
+          <input type="number" class="form-control" id="qdAmount" placeholder="0.00" step="0.01" min="0" autofocus /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Deposits.quickSave()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EXPENSE MODAL (P&L) -->
+<div class="modal fade" id="expenseModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="expenseModalTitle">Запись P&amp;L</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="expenseId" />
+        <div class="mb-2"><label class="form-label small">Дата</label>
+          <input type="date" class="form-control form-control-sm" id="expenseDate" /></div>
+        <div class="mb-2"><label class="form-label small">Тип</label>
+          <select class="form-select form-select-sm" id="expenseCategory" onchange="App.Expenses.onTypeChange()">
+            <option value="expense">Расход</option>
+            <option value="income">Доход</option>
+          </select></div>
+        <div class="mb-2"><label class="form-label small">Категория</label>
+          <select class="form-select form-select-sm" id="expenseCatSelect" onchange="App.Expenses.onCatChange()">
+            <option value="">— выберите категорию —</option>
+          </select></div>
+        <div class="mb-2"><label class="form-label small">Подстатья</label>
+          <select class="form-select form-select-sm" id="expenseItemSelect">
+            <option value="">— выберите подстатью —</option>
+          </select></div>
+        <div class="mb-2"><label class="form-label small">Сумма $</label>
+          <input type="number" class="form-control form-control-sm" id="expenseAmount" placeholder="0.00" step="0.01" min="0" /></div>
+        <div class="mb-2">
+          <label class="form-label small">Примечание</label>
+          <textarea class="form-control form-control-sm" id="expenseNotes" rows="2" placeholder="Дополнительные детали..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Expenses.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PATTERN MODAL -->
+<div class="modal fade" id="patternModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title">Паттерн распознавания</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="patternId" />
+        <div class="mb-2"><label class="form-label small">Тип</label>
+          <select class="form-select form-select-sm" id="patternType">
+            <option value="geo">Гео</option>
+            <option value="agent">Агентство</option>
+            <option value="creative">Креатив</option>
+          </select></div>
+        <div class="mb-2"><label class="form-label small">Regex паттерн</label>
+          <input type="text" class="form-control form-control-sm font-monospace" id="patternRegex"
+            placeholder="(?i)cdn|^[0-9]+" /></div>
+        <div class="mb-2"><label class="form-label small">Гео / Агентство</label>
+          <select class="form-select form-select-sm" id="patternEntityId"></select></div>
+        <div class="mb-2"><label class="form-label small">Приоритет (выше = раньше)</label>
+          <input type="number" class="form-control form-control-sm" id="patternPriority" value="0" /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Patterns.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EXPENSE CATEGORY MODAL -->
+<div class="modal fade" id="expCatModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="expCatModalTitle">Категория</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="expCatId" />
+        <div class="mb-2"><label class="form-label small">Тип</label>
+          <select class="form-select form-select-sm" id="expCatType">
+            <option value="expense">Расход</option>
+            <option value="income">Доход</option>
+          </select></div>
+        <div class="mb-2"><label class="form-label small">Название категории</label>
+          <input type="text" class="form-control form-control-sm" id="expCatName"
+            placeholder="Зарплата, Трафик, Сервисы..." /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.ExpCat.saveCategory()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EXPENSE ITEM MODAL -->
+<div class="modal fade" id="expItemModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title" id="expItemModalTitle">Подстатья</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="expItemId" />
+        <input type="hidden" id="expItemCatId" />
+        <div class="mb-2"><label class="form-label small">Название</label>
+          <input type="text" class="form-control form-control-sm" id="expItemName"
+            placeholder="Зарплата Иван, CadenT2277..." /></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.ExpCat.saveItem()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BULK ACTION TOOLBAR -->
+<div id="bulkToolbar" class="d-none">
+  <div class="d-flex align-items-center gap-3">
+    <span class="small"><strong id="bulkCount">0</strong> выбрано</span>
+    <button class="btn btn-sm btn-danger" onclick="App.BulkDelete.execute()"><i class="bi bi-trash me-1"></i>Удалить выбранные</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="App.BulkDelete.cancel()">Отмена</button>
+  </div>
+</div>
+
+</div><!-- /content-area -->
+</main><!-- /main-content -->
+</div><!-- /app-layout -->
+</div><!-- /mainApp -->
+
+<!-- TOAST -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="toast" class="toast align-items-center border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg"></div>
+      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ROI Calculator FAB -->
+<button class="roi-calc-fab" onclick="App.ROICalc.toggle()" title="ROI Калькулятор"><i class="bi bi-calculator"></i></button>
+
+<!-- ROI Calculator Modal -->
+<div class="modal fade" id="roiCalcModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-calculator me-2"></i>ROI Калькулятор</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small">Спенд ($)</label>
+          <input type="number" class="form-control form-control-sm" id="roiSpend" placeholder="0.00" step="0.01" oninput="App.ROICalc.calculate()">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Доход ($)</label>
+          <input type="number" class="form-control form-control-sm" id="roiDeposits" placeholder="0.00" step="0.01" oninput="App.ROICalc.calculate()">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Кол-во депозитов</label>
+          <input type="number" class="form-control form-control-sm" id="roiDepCount" placeholder="0" oninput="App.ROICalc.calculate()">
+        </div>
+        <div id="roiResult"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
