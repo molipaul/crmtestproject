@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-McQueen Tracker — full-stack Node.js CRM for traffic arbitrage. Russian-language SPA with role-based access (admin/buyer/operator). Deployed on Railway via git push to `main`.
+McQueen Tracker — full-stack Node.js CRM for traffic arbitrage. Russian-language SPA with role-based access (admin/buyer/operator). Deployed on Railway (temporary), target: VPS.
 
 ## Commands
 
@@ -20,10 +20,10 @@ Server runs on `http://localhost:8000` (or `$PORT`). Default login: `admin` / `a
 
 **Monolith**: single `server.js` (Express + better-sqlite3) serves API and static frontend.
 
-- `server.js` — All backend: schema, migrations, auth middleware, ~50 API routes, activity logging
-- `frontend/app.js` — All frontend logic (~2800 lines), ~20 `App.*` modules (Auth, Stats, Deposits, Import, Dashboard, etc.)
+- `server.js` — All backend: schema, migrations, auth middleware, ~60 API routes, activity logging, soft-delete/recycle bin
+- `frontend/app.js` — All frontend logic (~3000+ lines), ~22 `App.*` modules
 - `frontend/index.html` — SPA shell with all sections and modals
-- `frontend/style.css` — Bootstrap 5.3 overrides
+- `frontend/style.css` — Bootstrap 5.3 overrides + custom sidebar/nav-group styles
 - `crm.db` — SQLite database (auto-created, WAL mode, foreign keys ON)
 
 No build step. No frameworks. No ORM. All DB calls are synchronous (better-sqlite3).
@@ -43,26 +43,54 @@ Role visibility in HTML: classes `role-admin`, `role-adminbuyer`, `role-adminope
 
 **Adset name parsing** (`parseAdsetName`): strict abbreviation matching — geo prefix first (longest match), then agent abbreviation after geo. No regex patterns, no creative auto-creation. Example: `BRcdn129B2L2` → geo=BR, agent=cdn.
 
+**Agent commissions in spend**: `spendExpr(withCommission)` helper returns SQL expression. When commission enabled (default), each spend record multiplied by `(1 + commission_pct/100)` using the commission rate effective on that record's date. Query param `without_commission=1` switches to raw spend. Applied to all statistics endpoints + dashboard.
+
+**Soft delete / Recycle bin**: `softDelete(tableName, recordId, userId, username)` saves full record JSON to `deleted_records` table before permanent deletion. Auto-purge >30 days. Restore via `POST /api/deleted/:id/restore` (temporarily disables FK checks). Admin sees all, buyer sees only own deletions.
+
+**Cascade geo deletion**: `DELETE /api/geos/:id` cascades to adsets → spend_records → chatterfy_records → manual_deposits → creatives → offers. All soft-deleted before permanent removal. `GET /api/geos/:id/stats` returns counts for confirm dialog.
+
+**Orphaned adset cleanup**: `cleanupOrphanedAdset(adsetId)` — after deleting a spend/chatterfy record, if adset has no remaining records, it's auto-deleted.
+
 **Migrations**: idempotent `ALTER TABLE` wrapped in `try/catch` — no migration files.
 
 **Activity logging**: `logActivity(userId, username, action, details)` on all admin actions.
 
-**Statistics queries**: correlated subqueries with dynamic WHERE clauses built from `geo_id`, `agent_id`, date range params.
+**Statistics queries**: correlated subqueries with dynamic WHERE clauses built from `geo_id`, `agent_id`, date range params. `enrichStats()` adds profit, ROI, cost-per, conversion percentages.
 
 ## Database
 
-20+ tables. Key ones: `users`, `sessions`, `geos`, `agents`, `creatives`, `adsets`, `fb_cabinets`, `spend_records`, `chatterfy_records`, `manual_deposits`, `team_expenses`, `activity_log`.
+22+ tables. Key ones:
+- **Core**: `users`, `sessions`, `geos`, `agents`, `agent_commissions`, `creatives`, `adsets`
+- **Import**: `fb_cabinets`, `spend_records`, `chatterfy_records`
+- **Deposits**: `manual_deposits` (type: dep/redep, status: pending/confirmed)
+- **P&L**: `team_expenses`, `expense_categories`, `expense_items`
+- **System**: `activity_log`, `deleted_records`, `operator_geos`, `offers`, `budgets`
 
 Reset DB: delete `crm.db*` files, restart server.
 
-**Railway caveat**: SQLite is ephemeral — data lost on redeploy. Volume mount or DB migration needed for persistence.
+**SQLite on Railway is ephemeral** — data lost on redeploy. Final deployment target is VPS where SQLite will persist fine.
 
 ## Frontend Modules
 
-`App.Auth`, `App.Stats`, `App.Deposits`, `App.Import`, `App.Dashboard`, `App.Geos`, `App.Agents`, `App.Creatives`, `App.Undefined`, `App.Cabinets`, `App.Users`, `App.Expenses`, `App.PL`, `App.ActivityLog`, `App.Notifications`, `App.Export`
+`App.Auth`, `App.Stats`, `App.Deposits`, `App.Import`, `App.Dashboard`, `App.Geos`, `App.Agents`, `App.Creatives`, `App.Undefined`, `App.Cabinets`, `App.Users`, `App.Expenses`, `App.PL`, `App.ActivityLog`, `App.Notifications`, `App.Export`, `App.Deleted`, `App.Funnel`, `App.ROICalc`, `App.BulkDelete`
 
 Global state loaded on init: `state.geos`, `state.agents`. Navigation via `showSection(name)` + `switchDict(name)`.
 
+**Hash-routing**: URL updates to `#section-name` on navigation. Ctrl+Click / middle-click opens in new tab. Initial hash restored after login via `_initialHash`.
+
+**Collapsible sidebar groups**: СЛОВАРИ and ИМПОРТ sections collapse/expand via `toggleNavGroup(id)`, state saved in localStorage.
+
+**Statistics**: loads only on "Применить" button or tab switch (not on date input change). Date shortcut buttons (Вчера, Неделя, etc.) clear active state on manual date change via `clearShortcuts()`. Conversion percentages shown without color, ROI keeps green/red.
+
 ## Deployment
 
-Git push to `main` → Railway auto-deploys. Remote: `https://github.com/molipaul/crmtestproject.git`. Production URL: `https://crmtestproject-production.up.railway.app`
+Git push to `main` → Railway auto-deploys (sometimes needs manual Redeploy). Remote: `https://github.com/molipaul/crmtestproject.git`. Production URL: `https://crmtestproject-production.up.railway.app`
+
+## Roadmap / Known Plans
+
+- WebSocket/SSE for realtime notifications (replace 15s polling)
+- Audit trail for data changes (not just deletes)
+- UX improvements: animations, skeleton loading, toast progress bars, sidebar compact mode, responsive/mobile
+- Sortable columns across all tables, sticky first column
+- Saved filter presets in statistics (localStorage)
+- Final deployment: VPS (SQLite persistent, no migration needed)

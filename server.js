@@ -1629,14 +1629,21 @@ app.delete('/api/import/chatterfy/bulk', adminBuyer, (req, res) => {
 
 // ─── DELETED RECORDS (RECYCLE BIN) ───────────────────────────────────────────
 
-app.get('/api/deleted', adminOnly, (req, res) => {
+app.get('/api/deleted', adminBuyer, (req, res) => {
   // Auto-purge old records
   db.prepare("DELETE FROM deleted_records WHERE deleted_at < datetime('now', '-30 days')").run();
-  const rows = db.prepare('SELECT * FROM deleted_records ORDER BY deleted_at DESC').all();
+  const rows = req.user.role === 'admin'
+    ? db.prepare('SELECT * FROM deleted_records ORDER BY deleted_at DESC').all()
+    : db.prepare('SELECT * FROM deleted_records WHERE deleted_by = ? ORDER BY deleted_at DESC').all(req.user.id);
   res.json(rows);
 });
 
-app.post('/api/deleted/:id/restore', adminOnly, (req, res) => {
+app.post('/api/deleted/:id/restore', adminBuyer, (req, res) => {
+  // Buyer can only restore own deletions
+  if (req.user.role === 'buyer') {
+    const check = db.prepare('SELECT deleted_by FROM deleted_records WHERE id = ?').get(req.params.id);
+    if (!check || check.deleted_by !== req.user.id) return err(res, 403, 'Можно восстановить только свои записи');
+  }
   const rec = db.prepare('SELECT * FROM deleted_records WHERE id = ?').get(req.params.id);
   if (!rec) return err(res, 404, 'Запись не найдена');
   const data = JSON.parse(rec.record_data);
@@ -1656,7 +1663,11 @@ app.post('/api/deleted/:id/restore', adminOnly, (req, res) => {
   }
 });
 
-app.delete('/api/deleted/:id', adminOnly, (req, res) => {
+app.delete('/api/deleted/:id', adminBuyer, (req, res) => {
+  if (req.user.role === 'buyer') {
+    const check = db.prepare('SELECT deleted_by FROM deleted_records WHERE id = ?').get(req.params.id);
+    if (!check || check.deleted_by !== req.user.id) return err(res, 403, 'Нет доступа');
+  }
   db.prepare('DELETE FROM deleted_records WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
