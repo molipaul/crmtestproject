@@ -2,6 +2,28 @@
 
 const API = '';
 
+// ─── MOBILE SIDEBAR ───────────────────────────────────────────────────────────
+function openMobileSidebar() {
+  document.querySelector('.sidebar')?.classList.add('mobile-open');
+  document.getElementById('mobileOverlay')?.classList.add('show');
+}
+function closeMobileSidebar() {
+  document.querySelector('.sidebar')?.classList.remove('mobile-open');
+  document.getElementById('mobileOverlay')?.classList.remove('show');
+}
+
+// ─── SIDEBAR COMPACT ──────────────────────────────────────────────────────────
+function toggleSidebarCompact() {
+  const sidebar = document.querySelector('.sidebar');
+  sidebar.classList.toggle('compact');
+  localStorage.setItem('sidebar_compact', sidebar.classList.contains('compact') ? '1' : '0');
+}
+function restoreSidebarCompact() {
+  if (localStorage.getItem('sidebar_compact') === '1') {
+    document.querySelector('.sidebar')?.classList.add('compact');
+  }
+}
+
 // ─── NAV GROUP TOGGLE ─────────────────────────────────────────────────────────
 function toggleNavGroup(id) {
   const group = document.getElementById(`navGroup${id.charAt(0).toUpperCase()+id.slice(1)}`);
@@ -56,11 +78,16 @@ async function apiFetch(url, opts = {}) {
 }
 
 function toast(msg, type = 'success') {
-  const el = document.getElementById('toast');
-  const msgEl = document.getElementById('toastMsg');
-  el.className = `toast align-items-center border-0 text-bg-${type}`;
-  msgEl.textContent = msg;
-  bootstrap.Toast.getOrCreateInstance(el, { delay: 3500 }).show();
+  const icons = { success:'check-circle-fill', danger:'exclamation-triangle-fill', warning:'exclamation-circle-fill', info:'info-circle-fill' };
+  const colors = { success:'#10b981', danger:'#ef4444', warning:'#f59e0b', info:'#3b82f6' };
+  const container = document.getElementById('toastStack');
+  const t = document.createElement('div');
+  t.className = 'crm-toast';
+  t.style.setProperty('--toast-color', colors[type] || colors.info);
+  t.innerHTML = `<div class="crm-toast-body"><i class="bi bi-${icons[type]||icons.info}" style="color:${colors[type]||colors.info};font-size:1.1rem"></i><span>${msg}</span><button class="crm-toast-close" onclick="this.parentElement.parentElement.remove()">&times;</button></div><div class="crm-toast-progress"></div>`;
+  container.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3500);
 }
 
 // ─── UI HELPERS ──────────────────────────────────────────────────────────────
@@ -71,8 +98,8 @@ function showSkeleton(containerId, count = 3) {
   el.innerHTML = Array(count).fill('<div class="skeleton skeleton-card"></div>').join('');
 }
 
-function emptyState(icon, text) {
-  return `<div class="empty-state"><div class="empty-state-icon"><i class="bi bi-${icon}"></i></div><div class="empty-state-text">${text}</div></div>`;
+function emptyState(icon, text, actionHtml) {
+  return `<div class="empty-state"><div class="empty-state-icon"><i class="bi bi-${icon}"></i></div><div class="empty-state-text">${text}</div>${actionHtml ? `<div class="mt-2">${actionHtml}</div>` : ''}</div>`;
 }
 
 function fmt(n, d = 2) {
@@ -175,6 +202,7 @@ App.Auth = {
     window._initialHash = location.hash.slice(1); // save before setupRoleUI overwrites it
     setupRoleUI(user.role);
     restoreNavGroups();
+    restoreSidebarCompact();
     showApp();
     initApp(user);
   },
@@ -892,6 +920,7 @@ App.Stats = {
   },
 
   async load() {
+    this._renderPresets();
     if (this._mode === 'compare') { await this.loadCompare(); return; }
     // Auto-default to current month on first load
     const fromEl = document.getElementById('statsFrom');
@@ -1023,6 +1052,63 @@ App.Stats = {
     this._activeShortcut = null;
     this.setMode('range');
     this.load();
+  },
+
+  // Filter presets
+  savePreset() {
+    const name = prompt('Название пресета:');
+    if (!name) return;
+    const preset = {
+      name,
+      from: document.getElementById('statsFrom')?.value || '',
+      to: document.getElementById('statsTo')?.value || '',
+      geo_id: document.getElementById('statsGeoFilter')?.value || '',
+      agent_id: document.getElementById('statsAgentFilter')?.value || '',
+      showZeros: document.getElementById('statsShowZeros')?.checked || false,
+      withoutCommission: document.getElementById('statsWithoutCommission')?.checked || false,
+    };
+    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
+    presets.push(preset);
+    localStorage.setItem('stats_presets', JSON.stringify(presets));
+    this._renderPresets();
+    toast(`Пресет "${name}" сохранён`, 'success');
+  },
+  loadPreset(idx) {
+    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
+    const p = presets[idx];
+    if (!p) return;
+    if (p.from) document.getElementById('statsFrom').value = p.from;
+    if (p.to) document.getElementById('statsTo').value = p.to;
+    document.getElementById('statsGeoFilter').value = p.geo_id || '';
+    const af = document.getElementById('statsAgentFilter'); if (af) af.value = p.agent_id || '';
+    const sz = document.getElementById('statsShowZeros'); if (sz) sz.checked = !!p.showZeros;
+    const wc = document.getElementById('statsWithoutCommission'); if (wc) wc.checked = !!p.withoutCommission;
+    this.load();
+    toast(`Фильтр "${p.name}" применён`, 'info');
+  },
+  deletePreset(idx) {
+    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
+    presets.splice(idx, 1);
+    localStorage.setItem('stats_presets', JSON.stringify(presets));
+    this._renderPresets();
+  },
+  _renderPresets() {
+    const menu = document.getElementById('statsPresetsMenu');
+    if (!menu) return;
+    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
+    const hint = document.getElementById('noPresetsHint');
+    if (hint) hint.style.display = presets.length ? 'none' : '';
+    // Remove old preset items
+    menu.querySelectorAll('.preset-item').forEach(el => el.remove());
+    presets.forEach((p, i) => {
+      const li = document.createElement('li');
+      li.className = 'preset-item';
+      li.innerHTML = `<a class="dropdown-item small d-flex justify-content-between align-items-center" href="#" onclick="App.Stats.loadPreset(${i});return false">
+        <span>${p.name}</span>
+        <button class="btn btn-sm p-0 text-danger" onclick="event.stopPropagation();App.Stats.deletePreset(${i})" title="Удалить"><i class="bi bi-x"></i></button>
+      </a>`;
+      menu.appendChild(li);
+    });
   },
 
   cols() {
@@ -2793,6 +2879,95 @@ App.Deleted = {
   },
 };
 
+// ─── GLOBAL SEARCH ──────────────────────────────────────────────────────────
+
+App.Search = {
+  _timeout: null,
+  open() {
+    const ov = document.getElementById('searchOverlay');
+    ov.classList.remove('d-none');
+    const inp = document.getElementById('globalSearchInput');
+    inp.value = '';
+    inp.focus();
+    document.getElementById('searchResults').innerHTML = '<div class="search-empty">Начните вводить для поиска</div>';
+  },
+  close() {
+    document.getElementById('searchOverlay').classList.add('d-none');
+  },
+  query(q) {
+    clearTimeout(this._timeout);
+    if (!q || q.length < 2) {
+      document.getElementById('searchResults').innerHTML = '<div class="search-empty">Минимум 2 символа</div>';
+      return;
+    }
+    this._timeout = setTimeout(async () => {
+      try {
+        const results = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const el = document.getElementById('searchResults');
+        if (!results.length) { el.innerHTML = '<div class="search-empty">Ничего не найдено</div>'; return; }
+        const typeIcons = { geo:'globe', agent:'building', creative:'brush', adset:'collection' };
+        const typeLabels = { geo:'Гео', agent:'Агент', creative:'Креатив', adset:'Адсет' };
+        el.innerHTML = results.map(r => `<div class="search-result" onclick="App.Search.navigate('${r.section}','${r.dict}')">
+          <i class="bi bi-${typeIcons[r.type]||'search'}"></i>
+          <span class="flex-grow-1">${r.label}</span>
+          <span class="badge bg-secondary">${typeLabels[r.type]||r.type}</span>
+        </div>`).join('');
+      } catch { /* ignore */ }
+    }, 300);
+  },
+  navigate(section, dict) {
+    this.close();
+    showSection(section);
+    if (dict) switchDict(dict);
+  },
+};
+
+// ─── KEYBOARD SHORTCUTS ─────────────────────────────────────────────────────
+
+document.addEventListener('keydown', (e) => {
+  // Ctrl+K / Cmd+K — global search
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    App.Search.open();
+    return;
+  }
+  // Escape — close search overlay
+  if (e.key === 'Escape') {
+    const search = document.getElementById('searchOverlay');
+    if (search && !search.classList.contains('d-none')) { App.Search.close(); return; }
+  }
+});
+
+// ─── REALTIME (SSE) ─────────────────────────────────────────────────────────
+
+App.Realtime = {
+  _es: null,
+  init() {
+    if (this._es) { this._es.close(); this._es = null; }
+    const token = getToken();
+    if (!token) return;
+    try {
+      this._es = new EventSource(`/api/events?token=${token}`);
+      this._es.addEventListener('pending_update', () => {
+        App.Deposits._updatePendingBadge();
+        App.Notifications.check();
+      });
+      this._es.addEventListener('data_update', () => {
+        checkUndefined();
+        App.Notifications.check();
+      });
+      this._es.onerror = () => {
+        // Fallback to polling on SSE failure
+        if (this._es) { this._es.close(); this._es = null; }
+        App.Notifications._startPollingFallback();
+      };
+    } catch {
+      App.Notifications._startPollingFallback();
+    }
+  },
+  close() { if (this._es) { this._es.close(); this._es = null; } },
+};
+
 // ─── NOTIFICATIONS ──────────────────────────────────────────────────────────
 
 App.Notifications = {
@@ -2804,6 +2979,10 @@ App.Notifications = {
       return;
     }
     this.check();
+    // Try SSE first, fallback to polling
+    App.Realtime.init();
+  },
+  _startPollingFallback() {
     if (this._interval) clearInterval(this._interval);
     this._interval = setInterval(() => this.check(), 30000);
   },
@@ -2820,16 +2999,18 @@ App.Notifications = {
     } catch { this._undefCount = 0; }
     const count = this._pendingCount + this._undefCount;
     const badge = document.getElementById('notifBadge');
+    const prevCount = parseInt(badge.textContent) || 0;
     if (count > 0) {
       badge.textContent = count;
       badge.classList.remove('d-none');
+      if (count !== prevCount) { badge.classList.remove('pulse'); void badge.offsetWidth; badge.classList.add('pulse'); }
     } else {
       badge.classList.add('d-none');
     }
   },
   onClick() {
     const dd = document.getElementById('notifDropdown');
-    if (dd) { dd.classList.toggle('d-none'); this._renderDropdown(); return; }
+    if (dd) { const isOpen = dd.classList.contains('open'); dd.classList.remove('d-none'); dd.classList.toggle('open', !isOpen); if (isOpen) setTimeout(() => dd.classList.add('d-none'), 150); this._renderDropdown(); return; }
     // Fallback
     showSection('dictionaries'); switchDict('undefined');
   },

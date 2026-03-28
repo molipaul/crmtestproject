@@ -80,7 +80,19 @@ Global state loaded on init: `state.geos`, `state.agents`. Navigation via `showS
 
 **Collapsible sidebar groups**: СЛОВАРИ and ИМПОРТ sections collapse/expand via `toggleNavGroup(id)`, state saved in localStorage.
 
-**Statistics**: loads only on "Применить" button or tab switch (not on date input change). Date shortcut buttons (Вчера, Неделя, etc.) clear active state on manual date change via `clearShortcuts()`. Conversion percentages shown without color, ROI keeps green/red.
+**Statistics**: loads only on "Применить" button or tab switch (not on date input change). Date shortcut buttons (Вчера, Неделя, etc.) clear active state on manual date change via `clearShortcuts()`. Conversion percentages shown without color, ROI keeps green/red. Filter presets saved in localStorage via bookmark dropdown.
+
+**SSE (Server-Sent Events)**: `/api/events` endpoint replaces polling. Events: `pending_update`, `data_update`. Auth via query param `?token=`. Fallback to 30s polling if SSE fails. `App.Realtime.init()` manages EventSource lifecycle.
+
+**Audit trail**: `data_changes` table tracks field-level before/after values on all PUT endpoints (geos, agents, creatives). `trackChanges(tableName, recordId, oldData, newData, userId, username)` helper. API: `GET /api/changes?table_name=X&record_id=Y`.
+
+**Global search**: `Ctrl+K` opens search modal. Backend `GET /api/search?q=X` searches geos, agents, creatives, adsets. Results navigate to correct section/dict.
+
+**Compact sidebar**: Toggle button at bottom. 60px width, icons only, state in localStorage. CSS transitions on width.
+
+**Mobile responsive**: `@media (max-width: 768px)` — sidebar becomes slide-out drawer, hamburger button, 44px min touch targets.
+
+**Custom toast system**: Slide-in from right, progress bar timer (3.5s), stackable, color-coded by type (success/danger/warning/info).
 
 ## Deployment
 
@@ -88,9 +100,7 @@ Git push to `main` → Railway auto-deploys (sometimes needs manual Redeploy). R
 
 ## Roadmap / Known Plans
 
-- WebSocket/SSE for realtime notifications (replace 15s polling)
-- Audit trail for data changes (not just deletes)
-- UX improvements: animations, skeleton loading, toast progress bars, sidebar compact mode, responsive/mobile
-- Sortable columns across all tables, sticky first column
-- Saved filter presets in statistics (localStorage)
+- Dark mode toggle
+- Sortable columns across all tables (not just statistics)
+- Import progress bars for large batch operations
 - Final deployment: VPS (SQLite persistent, no migration needed)

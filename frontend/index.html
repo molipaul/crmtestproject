@@ -51,6 +51,7 @@
     <div id="notifDropdown" class="d-none position-absolute bg-white rounded-3 shadow-lg border" style="left:100%;top:-10px;width:280px;z-index:1050;max-height:300px;overflow-y:auto"></div>
   </div>
 
+  <div class="sidebar-scroll">
   <div class="sidebar-section-label">MANAGEMENT</div>
   <nav>
     <button class="nav-btn role-admin" data-section="pl">
@@ -116,6 +117,11 @@
   </nav>
 
 
+  </div><!-- end sidebar-scroll -->
+  <!-- Compact toggle -->
+  <button class="sidebar-toggle" onclick="toggleSidebarCompact()" title="Свернуть/Развернуть">
+    <i class="bi bi-chevron-bar-left" id="sidebarToggleIcon"></i>
+  </button>
   <!-- User info at bottom -->
   <div class="sidebar-user">
     <div class="d-flex align-items-center gap-2">
@@ -130,7 +136,9 @@
 </aside>
 
 <!-- MAIN CONTENT -->
+<div class="mobile-overlay" id="mobileOverlay" onclick="closeMobileSidebar()"></div>
 <main class="main-content">
+  <button class="mobile-hamburger btn btn-sm btn-outline-secondary d-none" id="mobileHamburger" onclick="openMobileSidebar()" style="position:fixed;top:10px;left:10px;z-index:998"><i class="bi bi-list"></i></button>
 <div class="content-area">
 
   <!-- BREADCRUMBS -->
@@ -282,6 +290,17 @@
         <button class="btn btn-sm btn-primary" onclick="App.Stats.applyFilters()" id="statsApplyBtn">
           <i class="bi bi-check2 me-1"></i>Применить
         </button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="App.Stats.clearFilters()" title="Сбросить фильтры">
+          <i class="bi bi-x-lg"></i>
+        </button>
+        <div class="dropdown d-inline-block">
+          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" title="Пресеты фильтров"><i class="bi bi-bookmark"></i></button>
+          <ul class="dropdown-menu dropdown-menu-end" id="statsPresetsMenu">
+            <li><a class="dropdown-item small" href="#" onclick="App.Stats.savePreset();return false"><i class="bi bi-plus-circle me-1"></i>Сохранить текущий</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li class="text-muted small px-3 py-1" id="noPresetsHint">Нет сохранённых</li>
+          </ul>
+        </div>
       </div>
 
       <!-- Compare mode -->
@@ -1144,15 +1163,20 @@
 </div><!-- /app-layout -->
 </div><!-- /mainApp -->
 
-<!-- TOAST -->
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
-  <div id="toast" class="toast align-items-center border-0" role="alert">
-    <div class="d-flex">
-      <div class="toast-body" id="toastMsg"></div>
-      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+<!-- GLOBAL SEARCH MODAL -->
+<div id="searchOverlay" class="search-overlay d-none" onclick="if(event.target===this)App.Search.close()">
+  <div class="search-modal">
+    <div class="search-input-wrap">
+      <i class="bi bi-search text-muted"></i>
+      <input type="text" id="globalSearchInput" placeholder="Поиск по CRM..." autocomplete="off" oninput="App.Search.query(this.value)">
+      <kbd>ESC</kbd>
     </div>
+    <div id="searchResults" class="search-results"></div>
   </div>
 </div>
+
+<!-- TOAST STACK -->
+<div id="toastStack" class="crm-toast-stack"></div>
 
 <!-- ROI Calculator FAB -->
 <button class="roi-calc-fab" onclick="App.ROICalc.toggle()" title="ROI Калькулятор"><i class="bi bi-calculator"></i></button>

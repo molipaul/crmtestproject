@@ -220,6 +220,28 @@ function logActivity(userId, username, action, details) {
   try { db.prepare('INSERT INTO activity_log (user_id, username, action, details) VALUES (?, ?, ?, ?)').run(userId, username, action, details || null); } catch {}
 }
 
+// Change tracking (audit trail)
+db.exec(`CREATE TABLE IF NOT EXISTS data_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  table_name TEXT NOT NULL,
+  record_id INTEGER NOT NULL,
+  field_name TEXT NOT NULL,
+  old_value TEXT,
+  new_value TEXT,
+  changed_by INTEGER REFERENCES users(id),
+  changed_by_name TEXT,
+  changed_at TEXT DEFAULT (datetime('now'))
+)`);
+
+function trackChanges(tableName, recordId, oldData, newData, userId, username) {
+  const ins = db.prepare('INSERT INTO data_changes (table_name, record_id, field_name, old_value, new_value, changed_by, changed_by_name) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  for (const key of Object.keys(newData)) {
+    if (String(oldData[key] ?? '') !== String(newData[key] ?? '')) {
+      ins.run(tableName, recordId, key, String(oldData[key] ?? ''), String(newData[key] ?? ''), userId, username);
+    }
+  }
+}
+
 function softDelete(tableName, recordId, userId, username) {
   const record = db.prepare(`SELECT * FROM ${tableName} WHERE id = ?`).get(recordId);
   if (!record) return;
@@ -457,7 +479,9 @@ app.post('/api/geos', adminBuyer, (req, res) => {
 
 app.put('/api/geos/:id', adminBuyer, (req, res) => {
   const { name, abbreviation } = req.body;
+  const old = db.prepare('SELECT * FROM geos WHERE id = ?').get(req.params.id);
   db.prepare('UPDATE geos SET name = ?, abbreviation = ? WHERE id = ?').run(name, abbreviation.toUpperCase(), req.params.id);
+  if (old) trackChanges('geos', req.params.id, old, { name, abbreviation: abbreviation.toUpperCase() }, req.user.id, req.user.username);
   logActivity(req.user.id, req.user.username, 'geo_update', name);
   res.json({ ok: true });
 });
@@ -532,7 +556,9 @@ app.post('/api/agents', adminBuyer, (req, res) => {
 
 app.put('/api/agents/:id', adminBuyer, (req, res) => {
   const { name, abbreviation } = req.body;
+  const old = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id);
   db.prepare('UPDATE agents SET name = ?, abbreviation = ? WHERE id = ?').run(name, abbreviation, req.params.id);
+  if (old) trackChanges('agents', req.params.id, old, { name, abbreviation }, req.user.id, req.user.username);
   logActivity(req.user.id, req.user.username, 'agent_update', name);
   res.json({ ok: true });
 });
@@ -586,7 +612,9 @@ app.post('/api/creatives', adminBuyer, (req, res) => {
 
 app.put('/api/creatives/:id', adminBuyer, (req, res) => {
   const { name, geo_id } = req.body;
+  const old = db.prepare('SELECT * FROM creatives WHERE id = ?').get(req.params.id);
   db.prepare('UPDATE creatives SET name = ?, geo_id = ? WHERE id = ?').run(name, geo_id || null, req.params.id);
+  if (old) trackChanges('creatives', req.params.id, old, { name, geo_id: geo_id || null }, req.user.id, req.user.username);
   res.json({ ok: true });
 });
 
@@ -884,6 +912,7 @@ app.post('/api/deposits', requireAuth('admin','buyer','operator'), (req, res) =>
     db.prepare('INSERT INTO manual_deposits (adset_id, date, amount, type, status, created_by) VALUES (?, ?, ?, ?, ?, ?)')
       .run(adset_id, date, depAmountForced, type, depStatusForced, req.user.id);
     logActivity(req.user.id, req.user.username, 'deposit_create', `${type} pending (buyer)`);
+    broadcast('pending_update', { action: 'created' });
     return res.json({ ok: true });
   }
   const depAmount = depStatus === 'pending' ? 0 : (amount || 0);
@@ -891,6 +920,7 @@ app.post('/api/deposits', requireAuth('admin','buyer','operator'), (req, res) =>
   db.prepare('INSERT INTO manual_deposits (adset_id, date, amount, type, status, created_by) VALUES (?, ?, ?, ?, ?, ?)')
     .run(adset_id, date, depAmount, type, depStatus, req.user.id);
   logActivity(req.user.id, req.user.username, 'deposit_create', `${type} $${depAmount} status=${depStatus}`);
+  if (depStatus === 'pending') broadcast('pending_update', { action: 'created' });
   res.json({ ok: true });
 });
 
@@ -921,6 +951,7 @@ app.put('/api/deposits/:id/confirm', adminOperator, (req, res) => {
   if (dep.status !== 'pending') return err(res, 400, 'Депозит уже подтверждён');
   db.prepare('UPDATE manual_deposits SET amount = ?, status = ? WHERE id = ?').run(amount, 'confirmed', req.params.id);
   logActivity(req.user.id, req.user.username, 'deposit_confirm', '$' + amount);
+  broadcast('pending_update', { action: 'confirmed' });
   res.json({ ok: true });
 });
 
@@ -933,6 +964,7 @@ app.delete('/api/deposits/:id', requireAuth('admin', 'operator', 'buyer'), (req,
   }
   softDelete('manual_deposits', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM manual_deposits WHERE id = ?').run(req.params.id);
+  broadcast('pending_update', { action: 'deleted' });
   res.json({ ok: true });
 });
 
@@ -977,6 +1009,7 @@ app.post('/api/import/spend', adminBuyer, (req, res) => {
     }
   })();
   logActivity(req.user.id, req.user.username, 'import_spend', 'imported ' + imported);
+  broadcast('data_update', { type: 'import_spend' });
   res.json({ ok: true, imported, undefined_adsets: [...undefined_adsets] });
 });
 
@@ -1646,17 +1679,30 @@ app.post('/api/deleted/:id/restore', adminBuyer, (req, res) => {
   }
   const rec = db.prepare('SELECT * FROM deleted_records WHERE id = ?').get(req.params.id);
   if (!rec) return err(res, 404, 'Запись не найдена');
-  const data = JSON.parse(rec.record_data);
-  const table = rec.table_name;
   try {
     db.pragma('foreign_keys = OFF');
-    const allCols = Object.keys(data);
-    const allVals = allCols.map(k => data[k]);
-    db.prepare(`INSERT OR REPLACE INTO ${table} (${allCols.join(',')}) VALUES (${allCols.map(() => '?').join(',')})`).run(...allVals);
-    db.prepare('DELETE FROM deleted_records WHERE id = ?').run(req.params.id);
+    // For cascade-deleted records (e.g. geo delete), restore all related records from same batch
+    // A "batch" = same deleted_by + deleted_at (within 2 seconds)
+    const batchRecords = db.prepare(
+      `SELECT * FROM deleted_records WHERE deleted_by = ? AND deleted_at BETWEEN datetime(?, '-2 seconds') AND datetime(?, '+2 seconds') ORDER BY id`
+    ).all(rec.deleted_by, rec.deleted_at, rec.deleted_at);
+    const toRestore = batchRecords.length > 1 ? batchRecords : [rec];
+    let restored = 0;
+    db.transaction(() => {
+      for (const r of toRestore) {
+        const data = JSON.parse(r.record_data);
+        const allCols = Object.keys(data);
+        const allVals = allCols.map(k => data[k]);
+        try {
+          db.prepare(`INSERT OR REPLACE INTO ${r.table_name} (${allCols.join(',')}) VALUES (${allCols.map(() => '?').join(',')})`).run(...allVals);
+          db.prepare('DELETE FROM deleted_records WHERE id = ?').run(r.id);
+          restored++;
+        } catch { /* skip individual failures */ }
+      }
+    })();
     db.pragma('foreign_keys = ON');
-    logActivity(req.user.id, req.user.username, 'restore', `${table} record restored`);
-    res.json({ ok: true });
+    logActivity(req.user.id, req.user.username, 'restore', `${rec.table_name} + ${restored} related records restored`);
+    res.json({ ok: true, restored });
   } catch(e) {
     db.pragma('foreign_keys = ON');
     err(res, 500, 'Не удалось восстановить: ' + e.message);
@@ -1670,6 +1716,66 @@ app.delete('/api/deleted/:id', adminBuyer, (req, res) => {
   }
   db.prepare('DELETE FROM deleted_records WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// ─── GLOBAL SEARCH ──────────────────────────────────────────────────────────
+
+app.get('/api/search', anyAuth, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 2) return res.json([]);
+  const like = `%${q}%`;
+  const results = [];
+  const geos = db.prepare('SELECT id, name, abbreviation FROM geos WHERE name LIKE ? OR abbreviation LIKE ? LIMIT 5').all(like, like);
+  geos.forEach(r => results.push({ type: 'geo', id: r.id, label: `${r.name} (${r.abbreviation})`, section: 'dictionaries', dict: 'geos' }));
+  const agents = db.prepare('SELECT id, name, abbreviation FROM agents WHERE name LIKE ? OR abbreviation LIKE ? LIMIT 5').all(like, like);
+  agents.forEach(r => results.push({ type: 'agent', id: r.id, label: `${r.name} (${r.abbreviation})`, section: 'dictionaries', dict: 'agents' }));
+  const creatives = db.prepare('SELECT id, name FROM creatives WHERE name LIKE ? LIMIT 5').all(like);
+  creatives.forEach(r => results.push({ type: 'creative', id: r.id, label: r.name, section: 'dictionaries', dict: 'creatives' }));
+  const adsets = db.prepare('SELECT id, name FROM adsets WHERE name LIKE ? LIMIT 10').all(like);
+  adsets.forEach(r => results.push({ type: 'adset', id: r.id, label: r.name, section: 'dictionaries', dict: 'undefined' }));
+  res.json(results);
+});
+
+// ─── DATA CHANGES (AUDIT TRAIL) ─────────────────────────────────────────────
+
+app.get('/api/changes', adminOnly, (req, res) => {
+  const { table_name, record_id } = req.query;
+  let q = 'SELECT * FROM data_changes WHERE 1=1';
+  const params = [];
+  if (table_name) { q += ' AND table_name = ?'; params.push(table_name); }
+  if (record_id) { q += ' AND record_id = ?'; params.push(parseInt(record_id)); }
+  q += ' ORDER BY changed_at DESC LIMIT 200';
+  res.json(db.prepare(q).all(...params));
+});
+
+// ─── SSE (Server-Sent Events) ────────────────────────────────────────────────
+
+const sseClients = new Set();
+
+function broadcast(event, data) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(msg); } catch { sseClients.delete(client); }
+  }
+}
+
+app.get('/api/events', (req, res) => {
+  // SSE: auth via query param since EventSource doesn't support headers
+  const token = req.query.token || req.headers.authorization?.slice(7);
+  if (!token) return res.status(401).end();
+  const session = db.prepare('SELECT s.token FROM sessions s WHERE s.token = ? AND s.expires_at > datetime(\'now\')').get(token);
+  if (!session) return res.status(401).end();
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  res.write(':\n\n'); // initial comment to establish connection
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+  // Heartbeat every 30s
+  const hb = setInterval(() => { try { res.write(':\n\n'); } catch { clearInterval(hb); sseClients.delete(res); } }, 30000);
+  req.on('close', () => clearInterval(hb));
 });
 
 // ─── START ───────────────────────────────────────────────────────────────────
