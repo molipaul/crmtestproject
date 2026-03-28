@@ -72,7 +72,7 @@ Reset DB: delete `crm.db*` files, restart server.
 
 ## Frontend Modules
 
-`App.Auth`, `App.Stats`, `App.Deposits`, `App.Import`, `App.Dashboard`, `App.Geos`, `App.Agents`, `App.Creatives`, `App.Undefined`, `App.Cabinets`, `App.Users`, `App.Expenses`, `App.PL`, `App.ActivityLog`, `App.Notifications`, `App.Export`, `App.Deleted`, `App.Funnel`, `App.ROICalc`, `App.BulkDelete`
+`App.Auth`, `App.Stats`, `App.Deposits`, `App.Import`, `App.Dashboard`, `App.Geos`, `App.Agents`, `App.Creatives`, `App.Undefined`, `App.Cabinets`, `App.Users`, `App.Expenses`, `App.PL`, `App.ActivityLog`, `App.Notifications`, `App.Export`, `App.Deleted`, `App.Funnel`, `App.BulkDelete`, `App.Search`, `App.Realtime`
 
 Global state loaded on init: `state.geos`, `state.agents`. Navigation via `showSection(name)` + `switchDict(name)`.
 

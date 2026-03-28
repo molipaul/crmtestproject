@@ -121,7 +121,7 @@ body {
   min-height: 32px;
   text-decoration: none;
 }
-.nav-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.nav-btn span:not(.sidebar-badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 0; }
 .nav-btn i { font-size: 0.95rem; width: 16px; text-align: center; flex-shrink: 0; }
 .nav-btn:hover { background: var(--bg-muted); color: var(--text); }
 .nav-btn.active { background: rgba(26, 86, 219, 0.1); color: var(--accent); font-weight: 600; }
@@ -155,14 +155,20 @@ body {
   transform: rotate(-90deg);
 }
 .sidebar-badge {
-  background: var(--warning);
+  background: var(--accent);
   color: #fff;
-  font-size: .6rem;
-  padding: 1px 6px;
-  border-radius: 10px;
+  font-size: .55rem;
+  padding: 0 5px;
+  border-radius: 8px;
   font-weight: 700;
   margin-left: auto;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  line-height: 1;
 }
 .sidebar-user {
   margin-top: auto;
@@ -781,25 +787,6 @@ a:hover { color: var(--accent-hover); }
   .nav-btn { min-height: 44px; }
   .btn { min-height: 44px; }
 }
-
-/* ─── ROI CALCULATOR ─── */
-.roi-calc-fab {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  width: 48px; height: 48px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  font-size: 1.25rem;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 16px rgba(26,86,219,0.3);
-  cursor: pointer;
-  z-index: 1000;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.roi-calc-fab:hover { transform: scale(1.1); box-shadow: 0 6px 24px rgba(26,86,219,0.4); }
 
 /* ─── LEADERBOARD ─── */
 .leaderboard-card {

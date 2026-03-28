@@ -227,12 +227,12 @@
       <!-- Bulk assign toolbar -->
       <div id="bulkAssignBar" class="d-none alert alert-info py-2 d-flex flex-wrap align-items-center gap-2 mb-2" style="border:1px solid #93c5fd">
         <span class="fw-semibold small"><i class="bi bi-check2-square me-1"></i>Выбрано: <span id="bulkSelectedCount">0</span></span>
-        <select class="form-select form-select-sm" style="width:160px" id="bulkGeoSelect"><option value="">Назначить гео...</option></select>
-        <button class="btn btn-sm btn-outline-primary" onclick="App.Undefined.bulkAssign('geo_id')"><i class="bi bi-globe2 me-1"></i>Гео</button>
-        <select class="form-select form-select-sm" style="width:160px" id="bulkAgentSelect"><option value="">Назначить агента...</option></select>
-        <button class="btn btn-sm btn-outline-primary" onclick="App.Undefined.bulkAssign('agent_id')"><i class="bi bi-people me-1"></i>Агент</button>
-        <select class="form-select form-select-sm" style="width:160px" id="bulkCreativeSelect"><option value="">Назначить креатив...</option></select>
-        <button class="btn btn-sm btn-outline-primary" onclick="App.Undefined.bulkAssign('creative_id')"><i class="bi bi-layers me-1"></i>Креатив</button>
+        <select class="form-select form-select-sm" style="width:150px" id="bulkGeoSelect"><option value="">Гео...</option></select>
+        <button class="btn btn-sm btn-primary" onclick="App.Undefined.bulkAssign('geo_id')"><i class="bi bi-check2 me-1"></i>Назначить</button>
+        <select class="form-select form-select-sm" style="width:150px" id="bulkAgentSelect"><option value="">Агент...</option></select>
+        <button class="btn btn-sm btn-primary" onclick="App.Undefined.bulkAssign('agent_id')"><i class="bi bi-check2 me-1"></i>Назначить</button>
+        <select class="form-select form-select-sm" style="width:150px" id="bulkCreativeSelect"><option value="">Креатив...</option></select>
+        <button class="btn btn-sm btn-primary" onclick="App.Undefined.bulkAssign('creative_id')"><i class="bi bi-check2 me-1"></i>Назначить</button>
         <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="App.Undefined.bulkSelectSimilar()"><i class="bi bi-regex me-1"></i>Похожие</button>
       </div>
       <div class="table-responsive">
@@ -1179,34 +1179,6 @@
 <div id="toastStack" class="crm-toast-stack"></div>
 
 <!-- ROI Calculator FAB -->
-<button class="roi-calc-fab" onclick="App.ROICalc.toggle()" title="ROI Калькулятор"><i class="bi bi-calculator"></i></button>
-
-<!-- ROI Calculator Modal -->
-<div class="modal fade" id="roiCalcModal" tabindex="-1">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h6 class="modal-title"><i class="bi bi-calculator me-2"></i>ROI Калькулятор</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-2">
-          <label class="form-label small">Спенд ($)</label>
-          <input type="number" class="form-control form-control-sm" id="roiSpend" placeholder="0.00" step="0.01" oninput="App.ROICalc.calculate()">
-        </div>
-        <div class="mb-2">
-          <label class="form-label small">Доход ($)</label>
-          <input type="number" class="form-control form-control-sm" id="roiDeposits" placeholder="0.00" step="0.01" oninput="App.ROICalc.calculate()">
-        </div>
-        <div class="mb-2">
-          <label class="form-label small">Кол-во депозитов</label>
-          <input type="number" class="form-control form-control-sm" id="roiDepCount" placeholder="0" oninput="App.ROICalc.calculate()">
-        </div>
-        <div id="roiResult"></div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="app.js"></script>

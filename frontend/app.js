@@ -398,6 +398,11 @@ function switchDict(name) {
   document.querySelectorAll('.nav-btn[data-dict-target]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.dictTarget === name);
   });
+  // Clear bulk selection when leaving undefined tab
+  document.getElementById('bulkAssignBar')?.classList.add('d-none');
+  document.querySelectorAll('.undef-check').forEach(cb => cb.checked = false);
+  const checkAll = document.getElementById('undefinedCheckAll');
+  if (checkAll) checkAll.checked = false;
   if (name === 'geos') App.Geos.load();
   if (name === 'agents') App.Agents.load();
   if (name === 'creatives') App.Creatives.load();
@@ -3108,38 +3113,6 @@ App.Funnel = {
         ${i > 0 ? `<div class="funnel-pct">${s.pct}%</div>` : '<div class="funnel-pct"></div>'}
       </div>${i < steps.length - 1 ? '<div class="funnel-arrow text-center"><i class="bi bi-arrow-down"></i></div>' : ''}`
     ).join('');
-  },
-};
-
-// ─── ROI CALCULATOR ────────────────────────────────────────────────────────
-
-App.ROICalc = {
-  toggle() {
-    const modal = document.getElementById('roiCalcModal');
-    if (modal) new bootstrap.Modal(modal).show();
-  },
-  calculate() {
-    const spend = parseFloat(document.getElementById('roiSpend')?.value) || 0;
-    const deposits = parseFloat(document.getElementById('roiDeposits')?.value) || 0;
-    const depCount = parseInt(document.getElementById('roiDepCount')?.value) || 0;
-    const profit = deposits - spend;
-    const roi = spend > 0 ? ((profit / spend) * 100) : 0;
-    const costPerDep = depCount > 0 ? (spend / depCount) : 0;
-    document.getElementById('roiResult').innerHTML = `
-      <div class="d-flex gap-3 mt-3">
-        <div class="flex-fill text-center p-2 rounded" style="background:var(--bg-muted)">
-          <div class="small text-muted">Прибыль</div>
-          <div class="fw-bold ${profit>=0?'text-success':'text-danger'}">${profit>=0?'+':''}$${fmt(Math.abs(profit))}</div>
-        </div>
-        <div class="flex-fill text-center p-2 rounded" style="background:var(--bg-muted)">
-          <div class="small text-muted">ROI</div>
-          <div class="fw-bold ${roi>=0?'text-success':'text-danger'}">${roi.toFixed(1)}%</div>
-        </div>
-        <div class="flex-fill text-center p-2 rounded" style="background:var(--bg-muted)">
-          <div class="small text-muted">$ДЕП</div>
-          <div class="fw-bold">$${fmt(costPerDep)}</div>
-        </div>
-      </div>`;
   },
 };
 
