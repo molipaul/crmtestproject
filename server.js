@@ -413,15 +413,14 @@ function parseAdsetName(name, geos, agents) {
     }
   }
 
-  // Match agent by abbreviation after geo prefix (strict, longest first)
-  if (geoMatch) {
-    const remaining = name.slice(geoMatch.abbreviation.length);
-    const sortedAgents = [...agents].sort((a, b) => b.abbreviation.length - a.abbreviation.length);
-    for (const agent of sortedAgents) {
-      if (remaining.slice(0, agent.abbreviation.length).toLowerCase() === agent.abbreviation.toLowerCase()) {
-        agentMatch = agent;
-        break;
-      }
+  // Match agent by abbreviation anywhere in name after geo prefix
+  // Strict: abbreviation must appear as substring (case-insensitive), longest match first
+  const nameLower = name.toLowerCase();
+  const sortedAgents = [...agents].sort((a, b) => b.abbreviation.length - a.abbreviation.length);
+  for (const agent of sortedAgents) {
+    if (nameLower.includes(agent.abbreviation.toLowerCase())) {
+      agentMatch = agent;
+      break;
     }
   }
 
@@ -666,15 +665,7 @@ app.post('/api/adsets', adminBuyer, (req, res) => {
   }
 });
 
-app.put('/api/adsets/:id', adminBuyer, (req, res) => {
-  const { name, creative_id, geo_id, agent_id, buyer_id } = req.body;
-  const is_undefined = (geo_id && agent_id) ? 0 : 1;
-  db.prepare('UPDATE adsets SET creative_id = ?, geo_id = ?, agent_id = ?, is_undefined = ?, buyer_id = ? WHERE id = ?')
-    .run(creative_id || null, geo_id || null, agent_id || null, is_undefined, buyer_id || null, req.params.id);
-  res.json({ ok: true });
-});
-
-// Bulk assign fields to multiple adsets
+// Bulk assign fields to multiple adsets (must be BEFORE :id route)
 app.put('/api/adsets/bulk', adminBuyer, (req, res) => {
   const { ids, geo_id, agent_id, creative_id } = req.body;
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ detail: 'ids required' });
@@ -695,6 +686,14 @@ app.put('/api/adsets/bulk', adminBuyer, (req, res) => {
   })();
   logActivity(req.user.id, req.user.username, 'adsets_bulk_assign', `${ok} adsets`);
   res.json({ ok, total: ids.length });
+});
+
+app.put('/api/adsets/:id', adminBuyer, (req, res) => {
+  const { name, creative_id, geo_id, agent_id, buyer_id } = req.body;
+  const is_undefined = (geo_id && agent_id) ? 0 : 1;
+  db.prepare('UPDATE adsets SET creative_id = ?, geo_id = ?, agent_id = ?, is_undefined = ?, buyer_id = ? WHERE id = ?')
+    .run(creative_id || null, geo_id || null, agent_id || null, is_undefined, buyer_id || null, req.params.id);
+  res.json({ ok: true });
 });
 
 app.delete('/api/adsets/:id', adminBuyer, (req, res) => {
