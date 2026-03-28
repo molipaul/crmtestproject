@@ -274,7 +274,7 @@ async function checkUndefined() {
 
 // ─── NAVIGATION ──────────────────────────────────────────────────────────────
 
-const allSections = ['dictionaries', 'statistics', 'deposits', 'imports', 'dashboard', 'users', 'pl', 'activitylog', 'pending'];
+const allSections = ['dictionaries', 'statistics', 'deposits', 'imports', 'dashboard', 'users', 'pl', 'activitylog', 'pending', 'deleted'];
 
 function showSection(name, skipHash) {
   if (!skipHash) history.replaceState(null, '', '#' + name);
@@ -315,8 +315,9 @@ function showSection(name, skipHash) {
   if (name === 'pl') App.PL.init();
   if (name === 'activitylog') App.ActivityLog.load();
   if (name === 'pending') App.Deposits.loadPending();
+  if (name === 'deleted') App.Deleted.load();
   // Update breadcrumbs
-  const sectionNames = { dashboard:'Дашборд', statistics:'Статистика', deposits:'FD/RD', imports:'Импорт', dictionaries:'Словари', users:'Пользователи', pl:'P&L Учёт', activitylog:'Журнал действий', pending:'Pending' };
+  const sectionNames = { dashboard:'Дашборд', statistics:'Статистика', deposits:'FD/RD', imports:'Импорт', dictionaries:'Словари', users:'Пользователи', pl:'P&L Учёт', activitylog:'Журнал действий', pending:'Pending', deleted:'Корзина' };
   document.getElementById('bcSection').textContent = sectionNames[name] || name;
   document.getElementById('bcSep').classList.add('d-none');
   document.getElementById('bcSub').classList.add('d-none');
@@ -519,9 +520,15 @@ App.Geos = {
     } catch(e) { toast(e.message,'danger'); }
   },
   async del(id) {
-    if (!confirm('Удалить гео?')) return;
-    try { await apiFetch(`/api/geos/${id}`,{method:'DELETE'}); toast('Удалено'); await this.load(); }
-    catch(e) { toast(e.message,'danger'); }
+    try {
+      const stats = await apiFetch(`/api/geos/${id}/stats`);
+      const total = stats.adsets + stats.spend_records + stats.chatterfy_records + stats.deposits;
+      const msg = total > 0
+        ? `Удалить гео и ВСЕ связанные данные?\n\nАдсеты: ${stats.adsets}\nСпенды: ${stats.spend_records}\nChatterfy: ${stats.chatterfy_records}\nДепозиты: ${stats.deposits}\n\nЭто действие необратимо!`
+        : 'Удалить гео?';
+      if (!confirm(msg)) return;
+      await apiFetch(`/api/geos/${id}`,{method:'DELETE'}); toast('Гео и связанные данные удалены'); await this.load(); checkUndefined();
+    } catch(e) { toast(e.message,'danger'); }
   },
 };
 
@@ -723,6 +730,15 @@ App.Adsets = {
 
 App.Undefined = {
   data: [],
+  async reParse() {
+    if (!confirm('Перепарсить все адсеты по аббревиатурам гео и агентов?')) return;
+    try {
+      const res = await apiFetch('/api/adsets/re-parse', { method: 'POST' });
+      toast(`Обновлено: ${res.updated} из ${res.total}`, res.updated > 0 ? 'success' : 'warning');
+      await this.load();
+      checkUndefined();
+    } catch(e) { toast(e.message, 'danger'); }
+  },
   async load() {
     this.data = await apiFetch('/api/adsets?undefined_only=true');
     const tb = document.getElementById('undefinedTbody');
@@ -896,6 +912,7 @@ App.Stats = {
     if (geoId && tab === 'creatives') p.push(`geo_id=${geoId}`);
     const agentId = document.getElementById('statsAgentFilter')?.value;
     if (agentId && tab === 'creatives') p.push(`agent_id=${agentId}`);
+    if (document.getElementById('statsWithoutCommission')?.checked) p.push('without_commission=1');
     const url = `/api/statistics/${tab}` + (p.length ? '?' + p.join('&') : '');
     try {
       this.data = await apiFetch(url);
@@ -1040,7 +1057,7 @@ App.Stats = {
       { key:'cost_redep', label:'$RD', align:'text-end', type:'usd' },
       { key:'pct_dep_redep', label:'%FD→RD', align:'text-end', type:'pct' },
       { key:'deposit_amount', label:'ВСЕ ПЛАТЕЖИ $', align:'text-end', type:'usd' },
-      { key:'spend', label:'СПЕНД $', align:'text-end', type:'usd' },
+      { key:'spend', label: document.getElementById('statsWithoutCommission')?.checked ? 'СПЕНД $' : 'СПЕНД+АГЕНТ $', align:'text-end', type:'usd' },
       { key:'profit', label:'± $', align:'text-end', type:'profit' },
       { key:'roi', label:'% ROI', align:'text-end', type:'roi' },
     ];
@@ -1259,6 +1276,7 @@ App.Stats = {
     const params = [`type=${type}`, `id=${id}`];
     if (from) params.push(`from=${from}`);
     if (to) params.push(`to=${to}`);
+    if (document.getElementById('statsWithoutCommission')?.checked) params.push('without_commission=1');
     try {
       const data = await apiFetch(`/api/statistics/drilldown?${params.join('&')}`);
       const filtered = data.filter(r => (r.pdp||0) > 0 || (r.spend||0) > 0 || (r.deposit_amount||0) > 0 || (r.dialogs||0) > 0);
@@ -1754,12 +1772,12 @@ App.Import = {
 
   async delChatterfy(id) {
     if (!confirm('Удалить эту запись?')) return;
-    try { await apiFetch(`/api/import/chatterfy/${id}`,{method:'DELETE'}); toast('Удалено'); await this.loadChatterfyHistory(); }
+    try { await apiFetch(`/api/import/chatterfy/${id}`,{method:'DELETE'}); toast('Удалено'); await this.loadChatterfyHistory(); checkUndefined(); }
     catch(e) { toast(e.message,'danger'); }
   },
   async delSpend(id) {
     if (!confirm('Удалить эту запись?')) return;
-    try { await apiFetch(`/api/import/spend/${id}`,{method:'DELETE'}); toast('Удалено'); await this.loadSpendHistory(); }
+    try { await apiFetch(`/api/import/spend/${id}`,{method:'DELETE'}); toast('Удалено'); await this.loadSpendHistory(); checkUndefined(); }
     catch(e) { toast(e.message,'danger'); }
   },
 
@@ -2046,7 +2064,7 @@ App.Dashboard = {
     try {
       const data = await apiFetch(`/api/dashboard/summary${qs}`);
       const cards = [
-        { label: 'Спенд', value: `$${fmt(data.total_spend)}`, icon: 'bi-graph-down', color: '#1a56db', bg: '#e8f0fd' },
+        { label: 'Спенд+агент.', value: `$${fmt(data.total_spend)}`, icon: 'bi-graph-down', color: '#1a56db', bg: '#e8f0fd' },
         { label: 'Доход (FD+RD)', value: `$${fmt(data.total_deposits)}`, icon: 'bi-cash-coin', color: '#10b981', bg: '#d1fae5' },
         { label: 'Прибыль', value: `${data.profit >= 0 ? '+' : ''}$${fmt(Math.abs(data.profit))}`, icon: 'bi-currency-dollar', color: data.profit >= 0 ? '#10b981' : '#ef4444', bg: data.profit >= 0 ? '#d1fae5' : '#fee2e2' },
         { label: 'ROI', value: `${data.roi}%`, icon: 'bi-percent', color: data.roi >= 0 ? '#10b981' : '#ef4444', bg: data.roi >= 0 ? '#d1fae5' : '#fee2e2' },
@@ -2721,6 +2739,57 @@ App.ActivityLog = {
     } catch {
       document.getElementById('activityLogContent').innerHTML = '<div class="text-center py-5"><i class="bi bi-clock-history" style="font-size:2.5rem;color:var(--text-muted);opacity:.3"></i><p class="text-muted mt-2">Нет записей в журнале</p></div>';
     }
+  },
+};
+
+// ─── DELETED RECORDS (RECYCLE BIN) ──────────────────────────────────────────
+
+App.Deleted = {
+  _typeNames: { geos:'Гео', agents:'Агент', creatives:'Креатив', adsets:'Адсет', spend_records:'Спенд', chatterfy_records:'Chatterfy', manual_deposits:'Депозит' },
+  _summary(table, data) {
+    try {
+      const d = typeof data === 'string' ? JSON.parse(data) : data;
+      switch(table) {
+        case 'geos': return `${d.name} (${d.abbreviation})`;
+        case 'agents': return `${d.name} (${d.abbreviation})`;
+        case 'creatives': return d.name;
+        case 'adsets': return d.name;
+        case 'spend_records': return `${d.adset_name || 'adset#'+d.adset_id} · ${d.date} · $${d.amount}`;
+        case 'chatterfy_records': return `${d.date} · pdp:${d.pdp} dia:${d.dialogs} reg:${d.registrations}`;
+        case 'manual_deposits': return `${d.date} · ${d.type} · $${d.amount}`;
+        default: return JSON.stringify(d).substring(0,80);
+      }
+    } catch { return '—'; }
+  },
+  async load() {
+    const tb = document.getElementById('deletedTbody');
+    try {
+      const rows = await apiFetch('/api/deleted');
+      if (!rows.length) {
+        tb.innerHTML = '<tr><td colspan="5">' + emptyState('trash3','Корзина пуста') + '</td></tr>';
+        return;
+      }
+      tb.innerHTML = rows.map(r => `<tr>
+        <td class="text-muted small">${r.deleted_at}</td>
+        <td><span class="badge bg-secondary" style="font-size:.65rem">${this._typeNames[r.table_name]||r.table_name}</span></td>
+        <td class="small font-monospace" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._summary(r.table_name, r.record_data)}</td>
+        <td class="small">${r.deleted_by_name||'—'}</td>
+        <td class="text-end">
+          ${btnIcon('arrow-counterclockwise','Восстановить',`App.Deleted.restore(${r.id})`)}
+          ${btnIcon('x-lg','Удалить навсегда',`App.Deleted.del(${r.id})`,true)}
+        </td>
+      </tr>`).join('');
+    } catch(e) { tb.innerHTML = `<tr><td colspan="5" class="text-danger">${e.message}</td></tr>`; }
+  },
+  async restore(id) {
+    if (!confirm('Восстановить эту запись?')) return;
+    try { await apiFetch(`/api/deleted/${id}/restore`,{method:'POST'}); toast('Восстановлено','success'); await this.load(); checkUndefined(); }
+    catch(e) { toast(e.message,'danger'); }
+  },
+  async del(id) {
+    if (!confirm('Удалить навсегда? Это необратимо.')) return;
+    try { await apiFetch(`/api/deleted/${id}`,{method:'DELETE'}); toast('Удалено окончательно'); await this.load(); }
+    catch(e) { toast(e.message,'danger'); }
   },
 };
 

@@ -202,8 +202,29 @@ db.exec(`
 `);
 try { db.exec("ALTER TABLE adsets ADD COLUMN offer_id INTEGER REFERENCES offers(id)"); } catch {}
 
+// Deleted records (recycle bin)
+db.exec(`CREATE TABLE IF NOT EXISTS deleted_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  table_name TEXT NOT NULL,
+  record_id INTEGER,
+  record_data TEXT NOT NULL,
+  deleted_by INTEGER REFERENCES users(id),
+  deleted_by_name TEXT,
+  deleted_at TEXT DEFAULT (datetime('now'))
+)`);
+
+// Auto-purge records older than 30 days
+db.prepare("DELETE FROM deleted_records WHERE deleted_at < datetime('now', '-30 days')").run();
+
 function logActivity(userId, username, action, details) {
   try { db.prepare('INSERT INTO activity_log (user_id, username, action, details) VALUES (?, ?, ?, ?)').run(userId, username, action, details || null); } catch {}
+}
+
+function softDelete(tableName, recordId, userId, username) {
+  const record = db.prepare(`SELECT * FROM ${tableName} WHERE id = ?`).get(recordId);
+  if (!record) return;
+  db.prepare('INSERT INTO deleted_records (table_name, record_id, record_data, deleted_by, deleted_by_name) VALUES (?, ?, ?, ?, ?)')
+    .run(tableName, recordId, JSON.stringify(record), userId, username);
 }
 
 // ─── AUTH HELPERS ─────────────────────────────────────────────────────────────
@@ -441,10 +462,46 @@ app.put('/api/geos/:id', adminBuyer, (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/geos/:id/stats', adminBuyer, (req, res) => {
+  const geoId = req.params.id;
+  const adsetIds = db.prepare('SELECT id FROM adsets WHERE geo_id = ?').all(geoId).map(r => r.id);
+  if (!adsetIds.length) return res.json({ adsets: 0, spend_records: 0, chatterfy_records: 0, deposits: 0 });
+  const ph = adsetIds.map(() => '?').join(',');
+  const spend = db.prepare(`SELECT COUNT(*) AS cnt FROM spend_records WHERE adset_id IN (${ph})`).get(...adsetIds).cnt;
+  const chatterfy = db.prepare(`SELECT COUNT(*) AS cnt FROM chatterfy_records WHERE adset_id IN (${ph})`).get(...adsetIds).cnt;
+  const deposits = db.prepare(`SELECT COUNT(*) AS cnt FROM manual_deposits WHERE adset_id IN (${ph})`).get(...adsetIds).cnt;
+  res.json({ adsets: adsetIds.length, spend_records: spend, chatterfy_records: chatterfy, deposits });
+});
+
 app.delete('/api/geos/:id', adminBuyer, (req, res) => {
-  db.prepare('DELETE FROM geos WHERE id = ?').run(req.params.id);
-  logActivity(req.user.id, req.user.username, 'geo_delete', req.params.id);
-  res.json({ ok: true });
+  const geoId = req.params.id;
+  const adsetIds = db.prepare('SELECT id FROM adsets WHERE geo_id = ?').all(geoId).map(r => r.id);
+  db.transaction(() => {
+    // Soft-delete all related records
+    softDelete('geos', geoId, req.user.id, req.user.username);
+    if (adsetIds.length) {
+      const ph = adsetIds.map(() => '?').join(',');
+      for (const aid of adsetIds) {
+        softDelete('adsets', aid, req.user.id, req.user.username);
+      }
+      // Soft-delete spend/chatterfy/deposits in batch
+      const spendRows = db.prepare(`SELECT id FROM spend_records WHERE adset_id IN (${ph})`).all(...adsetIds);
+      for (const r of spendRows) softDelete('spend_records', r.id, req.user.id, req.user.username);
+      const chatRows = db.prepare(`SELECT id FROM chatterfy_records WHERE adset_id IN (${ph})`).all(...adsetIds);
+      for (const r of chatRows) softDelete('chatterfy_records', r.id, req.user.id, req.user.username);
+      const depRows = db.prepare(`SELECT id FROM manual_deposits WHERE adset_id IN (${ph})`).all(...adsetIds);
+      for (const r of depRows) softDelete('manual_deposits', r.id, req.user.id, req.user.username);
+      db.prepare(`DELETE FROM spend_records WHERE adset_id IN (${ph})`).run(...adsetIds);
+      db.prepare(`DELETE FROM chatterfy_records WHERE adset_id IN (${ph})`).run(...adsetIds);
+      db.prepare(`DELETE FROM manual_deposits WHERE adset_id IN (${ph})`).run(...adsetIds);
+      db.prepare('DELETE FROM adsets WHERE geo_id = ?').run(geoId);
+    }
+    db.prepare('DELETE FROM creatives WHERE geo_id = ?').run(geoId);
+    db.prepare('DELETE FROM offers WHERE geo_id = ?').run(geoId);
+    db.prepare('DELETE FROM geos WHERE id = ?').run(geoId);
+  })();
+  logActivity(req.user.id, req.user.username, 'geo_delete_cascade', `geo #${geoId}, adsets: ${adsetIds.length}`);
+  res.json({ ok: true, deleted_adsets: adsetIds.length });
 });
 
 // ─── AGENTS ──────────────────────────────────────────────────────────────────
@@ -487,6 +544,7 @@ app.post('/api/agents/:id/commissions', adminBuyer, (req, res) => {
 });
 
 app.delete('/api/agents/:id', adminBuyer, (req, res) => {
+  softDelete('agents', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM agents WHERE id = ?').run(req.params.id);
   logActivity(req.user.id, req.user.username, 'agent_delete', req.params.id);
   res.json({ ok: true });
@@ -533,6 +591,7 @@ app.put('/api/creatives/:id', adminBuyer, (req, res) => {
 });
 
 app.delete('/api/creatives/:id', adminBuyer, (req, res) => {
+  softDelete('creatives', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM creatives WHERE id = ?').run(req.params.id);
   logActivity(req.user.id, req.user.username, 'creative_delete', req.params.id);
   res.json({ ok: true });
@@ -614,7 +673,7 @@ app.delete('/api/adsets/:id', adminBuyer, (req, res) => {
   const id = req.params.id;
   try {
     db.transaction(() => {
-      // Nullify FK references where possible, delete where NOT NULL constraint exists
+      softDelete('adsets', id, req.user.id, req.user.username);
       db.prepare('UPDATE spend_records SET adset_id = NULL WHERE adset_id = ?').run(id);
       db.prepare('UPDATE chatterfy_records SET adset_id = NULL WHERE adset_id = ?').run(id);
       db.prepare('DELETE FROM manual_deposits WHERE adset_id = ?').run(id);
@@ -630,13 +689,14 @@ app.delete('/api/adsets/:id', adminBuyer, (req, res) => {
 // ─── STATISTICS ──────────────────────────────────────────────────────────────
 
 app.get('/api/statistics/creatives', adminBuyer, (req, res) => { try {
-  const { geo_id, agent_id } = req.query;
+  const { geo_id, agent_id, without_commission } = req.query;
   const [s, e] = dateRange(req.query);
   const df_s = s ? 'AND sr.date BETWEEN ? AND ?' : '';
   const df_c = s ? 'AND ch.date BETWEEN ? AND ?' : '';
   const df_d = s ? 'AND md.date BETWEEN ? AND ?' : '';
   const gf = geo_id ? 'AND a.geo_id = ?' : '';
   const agf = agent_id ? 'AND a.agent_id = ?' : '';
+  const se = spendExpr(!without_commission);
 
   const makeParams = () => {
     const p = [];
@@ -648,7 +708,7 @@ app.get('/api/statistics/creatives', adminBuyer, (req, res) => { try {
 
   const rows = db.prepare(`
     SELECT c.id, c.name AS creative, g.name AS geo,
-      (SELECT COALESCE(SUM(sr.amount),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_s}) AS spend,
+      (SELECT COALESCE(SUM(${se}),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_s}) AS spend,
       (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS pdp,
       (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS dialogs,
       (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS registrations,
@@ -664,15 +724,17 @@ app.get('/api/statistics/creatives', adminBuyer, (req, res) => { try {
 } catch(e) { res.status(500).json({ detail: e.message }); } });
 
 app.get('/api/statistics/geos', adminBuyer, (req, res) => { try {
+  const { without_commission } = req.query;
   const [s, e] = dateRange(req.query);
   const df_s = s ? 'AND sr.date BETWEEN ? AND ?' : '';
   const df_c = s ? 'AND ch.date BETWEEN ? AND ?' : '';
   const df_d = s ? 'AND md.date BETWEEN ? AND ?' : '';
   const sp = s ? [s, e] : [];
+  const se = spendExpr(!without_commission);
 
   const rows = db.prepare(`
     SELECT t.id, t.name AS geo, t.abbreviation,
-      (SELECT COALESCE(SUM(sr.amount),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.geo_id=t.id ${df_s}) AS spend,
+      (SELECT COALESCE(SUM(${se}),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.geo_id=t.id ${df_s}) AS spend,
       (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS pdp,
       (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS dialogs,
       (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS registrations,
@@ -686,15 +748,17 @@ app.get('/api/statistics/geos', adminBuyer, (req, res) => { try {
 } catch(e) { res.status(500).json({ detail: e.message }); } });
 
 app.get('/api/statistics/agents', adminBuyer, (req, res) => { try {
+  const { without_commission } = req.query;
   const [s, e] = dateRange(req.query);
   const df_s = s ? 'AND sr.date BETWEEN ? AND ?' : '';
   const df_c = s ? 'AND ch.date BETWEEN ? AND ?' : '';
   const df_d = s ? 'AND md.date BETWEEN ? AND ?' : '';
   const sp = s ? [s, e] : [];
+  const se = spendExpr(!without_commission);
 
   const rows = db.prepare(`
     SELECT t.id, t.name AS agent, t.abbreviation,
-      (SELECT COALESCE(SUM(sr.amount),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.agent_id=t.id ${df_s}) AS spend,
+      (SELECT COALESCE(SUM(${se}),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.agent_id=t.id ${df_s}) AS spend,
       (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS pdp,
       (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS dialogs,
       (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS registrations,
@@ -720,17 +784,19 @@ app.get('/api/statistics/agents', adminBuyer, (req, res) => { try {
 
 // Drill-down: adsets for a specific creative/geo/agent
 app.get('/api/statistics/drilldown', adminBuyer, (req, res) => { try {
-  const { type, id } = req.query;
+  const { type, id, without_commission } = req.query;
   const [s, e] = dateRange(req.query);
   const df_s = s ? 'AND sr.date BETWEEN ? AND ?' : '';
   const df_c = s ? 'AND ch.date BETWEEN ? AND ?' : '';
   const df_d = s ? 'AND md.date BETWEEN ? AND ?' : '';
   const sp = s ? [s, e] : [];
   const filterCol = type === 'creative' ? 'a.creative_id' : type === 'geo' ? 'a.geo_id' : 'a.agent_id';
+  // For drilldown, we need 'a' alias for the adset itself to get agent_id for commission
+  const seDD = without_commission ? 'sr.amount' : `sr.amount * (1 + COALESCE((SELECT ac.commission_pct / 100.0 FROM agent_commissions ac WHERE ac.agent_id = a.agent_id AND ac.effective_from <= sr.date ORDER BY ac.effective_from DESC LIMIT 1), 0))`;
 
   const rows = db.prepare(`
     SELECT a.id, a.name AS adset,
-      (SELECT COALESCE(SUM(sr.amount),0) FROM spend_records sr WHERE sr.adset_id=a.id ${df_s}) AS spend,
+      (SELECT COALESCE(SUM(${seDD}),0) FROM spend_records sr WHERE sr.adset_id=a.id ${df_s}) AS spend,
       (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS pdp,
       (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS dialogs,
       (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS registrations,
@@ -742,6 +808,12 @@ app.get('/api/statistics/drilldown', adminBuyer, (req, res) => { try {
 
   res.json(rows.map(r => enrichStats(r)));
 } catch(e) { res.status(500).json({ detail: e.message }); } });
+
+// Helper: spend SQL expression with or without agent commission
+function spendExpr(withCommission) {
+  if (!withCommission) return 'sr.amount';
+  return `sr.amount * (1 + COALESCE((SELECT ac.commission_pct / 100.0 FROM agent_commissions ac WHERE ac.agent_id = a.agent_id AND ac.effective_from <= sr.date ORDER BY ac.effective_from DESC LIMIT 1), 0))`;
+}
 
 function enrichStats(r) {
   const spend = r.spend || 0;
@@ -859,6 +931,7 @@ app.delete('/api/deposits/:id', requireAuth('admin', 'operator', 'buyer'), (req,
     if (dep.status !== 'pending' || dep.created_by !== req.user.id)
       return err(res, 403, 'Можно удалять только свои pending-записи');
   }
+  softDelete('manual_deposits', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM manual_deposits WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -979,14 +1052,30 @@ app.get('/api/import/chatterfy', adminBuyer, (req, res) => {
   res.json(db.prepare(q).all(...params));
 });
 
+function cleanupOrphanedAdset(adsetId) {
+  if (!adsetId) return;
+  const hasSpend = db.prepare('SELECT 1 FROM spend_records WHERE adset_id = ? LIMIT 1').get(adsetId);
+  const hasChatterfy = db.prepare('SELECT 1 FROM chatterfy_records WHERE adset_id = ? LIMIT 1').get(adsetId);
+  const hasDeposits = db.prepare('SELECT 1 FROM manual_deposits WHERE adset_id = ? LIMIT 1').get(adsetId);
+  if (!hasSpend && !hasChatterfy && !hasDeposits) {
+    db.prepare('DELETE FROM adsets WHERE id = ?').run(adsetId);
+  }
+}
+
 app.delete('/api/import/chatterfy/:id', adminBuyer, (req, res) => {
+  const rec = db.prepare('SELECT adset_id FROM chatterfy_records WHERE id = ?').get(req.params.id);
+  softDelete('chatterfy_records', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM chatterfy_records WHERE id = ?').run(req.params.id);
+  if (rec) cleanupOrphanedAdset(rec.adset_id);
   logActivity(req.user.id, req.user.username, 'chatterfy_delete', `record #${req.params.id}`);
   res.json({ ok: true });
 });
 
 app.delete('/api/import/spend/:id', adminBuyer, (req, res) => {
+  const rec = db.prepare('SELECT adset_id FROM spend_records WHERE id = ?').get(req.params.id);
+  softDelete('spend_records', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM spend_records WHERE id = ?').run(req.params.id);
+  if (rec) cleanupOrphanedAdset(rec.adset_id);
   logActivity(req.user.id, req.user.username, 'spend_delete', `record #${req.params.id}`);
   res.json({ ok: true });
 });
@@ -1211,19 +1300,23 @@ app.delete('/api/expenses/:id', adminOnly, (req, res) => {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
 app.get('/api/dashboard/summary', requireAuth('admin','buyer'), (req, res) => {
+  const { without_commission } = req.query;
   const [s, e] = dateRange(req.query);
   const sp = s ? [s, e] : [];
-  const df_s = s ? 'AND date BETWEEN ? AND ?' : '';
+  const df_s = s ? 'AND sr.date BETWEEN ? AND ?' : '';
+  const df_d = s ? 'AND date BETWEEN ? AND ?' : '';
+  const se = without_commission
+    ? 'sr.amount'
+    : `sr.amount * (1 + COALESCE((SELECT ac.commission_pct / 100.0 FROM agent_commissions ac WHERE ac.agent_id = a.agent_id AND ac.effective_from <= sr.date ORDER BY ac.effective_from DESC LIMIT 1), 0))`;
   let total_spend, total_deposits;
   if (req.user.role === 'buyer') {
-    // Buyer sees only their own data
-    const bf = 'AND adset_id IN (SELECT DISTINCT adset_id FROM manual_deposits WHERE created_by = ?)';
+    const bf = 'AND sr.adset_id IN (SELECT DISTINCT adset_id FROM manual_deposits WHERE created_by = ?)';
     const bfDep = 'AND created_by = ?';
-    total_spend = db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM spend_records WHERE 1=1 ${bf} ${df_s}`).get(req.user.id, ...sp).v;
-    total_deposits = db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM manual_deposits WHERE 1=1 ${bfDep} ${df_s}`).get(req.user.id, ...sp).v;
+    total_spend = db.prepare(`SELECT COALESCE(SUM(${se}),0) AS v FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE 1=1 ${bf} ${df_s}`).get(req.user.id, ...sp).v;
+    total_deposits = db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM manual_deposits WHERE 1=1 ${bfDep} ${df_d}`).get(req.user.id, ...sp).v;
   } else {
-    total_spend = db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM spend_records WHERE 1=1 ${df_s}`).get(...sp).v;
-    total_deposits = db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM manual_deposits WHERE 1=1 ${df_s}`).get(...sp).v;
+    total_spend = db.prepare(`SELECT COALESCE(SUM(${se}),0) AS v FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE 1=1 ${df_s}`).get(...sp).v;
+    total_deposits = db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM manual_deposits WHERE 1=1 ${df_d}`).get(...sp).v;
   }
   res.json({
     total_spend: +total_spend.toFixed(2),
@@ -1234,11 +1327,13 @@ app.get('/api/dashboard/summary', requireAuth('admin','buyer'), (req, res) => {
 });
 
 app.get('/api/dashboard/buyers', requireAuth('admin','buyer'), (req, res) => {
+  const { without_commission } = req.query;
   const [s, e] = dateRange(req.query);
   const sp = s ? [s, e] : [];
   const df_s = s ? 'AND sr.date BETWEEN ? AND ?' : '';
   const df_c = s ? 'AND ch.date BETWEEN ? AND ?' : '';
   const df_d = s ? 'AND md.date BETWEEN ? AND ?' : '';
+  const se = spendExpr(!without_commission);
 
   const buyerFilter = req.user.role === 'buyer' ? 'AND u.id = ?' : '';
   const buyerParams = req.user.role === 'buyer' ? [req.user.id] : [];
@@ -1247,7 +1342,7 @@ app.get('/api/dashboard/buyers', requireAuth('admin','buyer'), (req, res) => {
     SELECT u.id, u.username AS buyer, u.agent_id,
       ag.name AS agency_name, ag.abbreviation,
       (SELECT COUNT(DISTINCT a.id) FROM adsets a WHERE a.buyer_id=u.id) AS adset_count,
-      (SELECT COALESCE(SUM(sr.amount),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.buyer_id=u.id ${df_s}) AS spend,
+      (SELECT COALESCE(SUM(${se}),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.buyer_id=u.id ${df_s}) AS spend,
       (SELECT COALESCE(SUM(ch.deposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.buyer_id=u.id ${df_c}) AS deposits_count,
       (SELECT COALESCE(SUM(ch.redeposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.buyer_id=u.id ${df_c}) AS redeposits_count,
       (SELECT COALESCE(SUM(md.amount),0) FROM manual_deposits md JOIN adsets a ON a.id=md.adset_id WHERE a.buyer_id=u.id ${df_d}) AS deposit_amount
@@ -1509,17 +1604,61 @@ app.get('/api/import/chatterfy/count', adminBuyer, (req, res) => {
 app.delete('/api/import/spend/bulk', adminBuyer, (req, res) => {
   const { from, to } = req.body;
   if (!from || !to) return err(res, 400, 'Укажите период');
-  const result = db.prepare('DELETE FROM spend_records WHERE date BETWEEN ? AND ?').run(from, to);
-  logActivity(req.user.id, req.user.username, 'spend_bulk_delete', `${from} - ${to}, deleted: ${result.changes}`);
-  res.json({ ok: true, deleted: result.changes });
+  const records = db.prepare('SELECT * FROM spend_records WHERE date BETWEEN ? AND ?').all(from, to);
+  const insertDel = db.prepare('INSERT INTO deleted_records (table_name, record_id, record_data, deleted_by, deleted_by_name) VALUES (?, ?, ?, ?, ?)');
+  db.transaction(() => {
+    for (const r of records) insertDel.run('spend_records', r.id, JSON.stringify(r), req.user.id, req.user.username);
+    db.prepare('DELETE FROM spend_records WHERE date BETWEEN ? AND ?').run(from, to);
+  })();
+  logActivity(req.user.id, req.user.username, 'spend_bulk_delete', `${from} - ${to}, deleted: ${records.length}`);
+  res.json({ ok: true, deleted: records.length });
 });
 
 app.delete('/api/import/chatterfy/bulk', adminBuyer, (req, res) => {
   const { from, to } = req.body;
   if (!from || !to) return err(res, 400, 'Укажите период');
-  const result = db.prepare('DELETE FROM chatterfy_records WHERE date BETWEEN ? AND ?').run(from, to);
-  logActivity(req.user.id, req.user.username, 'chatterfy_bulk_delete', `${from} - ${to}, deleted: ${result.changes}`);
-  res.json({ ok: true, deleted: result.changes });
+  const records = db.prepare('SELECT * FROM chatterfy_records WHERE date BETWEEN ? AND ?').all(from, to);
+  const insertDel = db.prepare('INSERT INTO deleted_records (table_name, record_id, record_data, deleted_by, deleted_by_name) VALUES (?, ?, ?, ?, ?)');
+  db.transaction(() => {
+    for (const r of records) insertDel.run('chatterfy_records', r.id, JSON.stringify(r), req.user.id, req.user.username);
+    db.prepare('DELETE FROM chatterfy_records WHERE date BETWEEN ? AND ?').run(from, to);
+  })();
+  logActivity(req.user.id, req.user.username, 'chatterfy_bulk_delete', `${from} - ${to}, deleted: ${records.length}`);
+  res.json({ ok: true, deleted: records.length });
+});
+
+// ─── DELETED RECORDS (RECYCLE BIN) ───────────────────────────────────────────
+
+app.get('/api/deleted', adminOnly, (req, res) => {
+  // Auto-purge old records
+  db.prepare("DELETE FROM deleted_records WHERE deleted_at < datetime('now', '-30 days')").run();
+  const rows = db.prepare('SELECT * FROM deleted_records ORDER BY deleted_at DESC').all();
+  res.json(rows);
+});
+
+app.post('/api/deleted/:id/restore', adminOnly, (req, res) => {
+  const rec = db.prepare('SELECT * FROM deleted_records WHERE id = ?').get(req.params.id);
+  if (!rec) return err(res, 404, 'Запись не найдена');
+  const data = JSON.parse(rec.record_data);
+  const table = rec.table_name;
+  try {
+    db.pragma('foreign_keys = OFF');
+    const allCols = Object.keys(data);
+    const allVals = allCols.map(k => data[k]);
+    db.prepare(`INSERT OR REPLACE INTO ${table} (${allCols.join(',')}) VALUES (${allCols.map(() => '?').join(',')})`).run(...allVals);
+    db.prepare('DELETE FROM deleted_records WHERE id = ?').run(req.params.id);
+    db.pragma('foreign_keys = ON');
+    logActivity(req.user.id, req.user.username, 'restore', `${table} record restored`);
+    res.json({ ok: true });
+  } catch(e) {
+    db.pragma('foreign_keys = ON');
+    err(res, 500, 'Не удалось восстановить: ' + e.message);
+  }
+});
+
+app.delete('/api/deleted/:id', adminOnly, (req, res) => {
+  db.prepare('DELETE FROM deleted_records WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
 });
 
 // ─── START ───────────────────────────────────────────────────────────────────
