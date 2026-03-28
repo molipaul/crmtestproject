@@ -449,17 +449,6 @@ function parseAdsetName(name, geos, agents) {
   return { geoMatch, agentMatch };
 }
 
-function matchCreative(adsetName, geo_id) {
-  if (!geo_id) return null;
-  // Find creatives for this geo, try matching by name substring in adset name (longest first)
-  const creatives = db.prepare('SELECT * FROM creatives WHERE geo_id = ? ORDER BY length(name) DESC').all(geo_id);
-  const upper = adsetName.toUpperCase();
-  for (const c of creatives) {
-    if (upper.includes(c.name.toUpperCase())) return c.id;
-  }
-  return null;
-}
-
 function resolveAdset(name) {
   let row = db.prepare('SELECT * FROM adsets WHERE name = ?').get(name);
   if (row) return row;
@@ -468,10 +457,9 @@ function resolveAdset(name) {
   const { geoMatch, agentMatch } = parseAdsetName(name, geos, agents);
   const geo_id = geoMatch ? geoMatch.id : null;
   const agent_id = agentMatch ? agentMatch.id : null;
-  const creative_id = matchCreative(name, geo_id);
-
+  // creative_id always null for new adsets — buyer assigns manually
   const is_undefined = (geo_id && agent_id) ? 0 : 1;
-  db.prepare('INSERT OR IGNORE INTO adsets (name, creative_id, geo_id, agent_id, is_undefined) VALUES (?, ?, ?, ?, ?)').run(name, creative_id, geo_id, agent_id, is_undefined);
+  db.prepare('INSERT OR IGNORE INTO adsets (name, creative_id, geo_id, agent_id, is_undefined) VALUES (?, ?, ?, ?, ?)').run(name, null, geo_id, agent_id, is_undefined);
   return db.prepare('SELECT * FROM adsets WHERE name = ?').get(name);
 }
 
@@ -1595,16 +1583,16 @@ app.post('/api/adsets/re-parse', adminBuyer, (req, res) => {
   const agents = db.prepare('SELECT * FROM agents').all();
   const adsets = db.prepare('SELECT * FROM adsets').all();
   let updated = 0;
-  const update = db.prepare('UPDATE adsets SET geo_id = ?, agent_id = ?, creative_id = COALESCE(creative_id, ?), is_undefined = ? WHERE id = ?');
+  // Re-parse only updates geo and agent — creative stays as manually assigned
+  const update = db.prepare('UPDATE adsets SET geo_id = ?, agent_id = ?, is_undefined = ? WHERE id = ?');
   db.transaction(() => {
     for (const a of adsets) {
       const { geoMatch, agentMatch } = parseAdsetName(a.name, geos, agents);
       const geo_id = geoMatch ? geoMatch.id : null;
       const agent_id = agentMatch ? agentMatch.id : null;
-      const creative_id = matchCreative(a.name, geo_id);
       const is_undefined = (geo_id && agent_id) ? 0 : 1;
-      if (a.geo_id !== geo_id || a.agent_id !== agent_id || (!a.creative_id && creative_id)) {
-        update.run(geo_id, agent_id, creative_id, is_undefined, a.id);
+      if (a.geo_id !== geo_id || a.agent_id !== agent_id) {
+        update.run(geo_id, agent_id, is_undefined, a.id);
         updated++;
       }
     }
