@@ -1492,6 +1492,20 @@ app.get('/api/activity-log', adminOnly, (req, res) => {
 });
 
 // Bulk delete import records
+app.get('/api/import/spend/count', adminBuyer, (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return err(res, 400, 'Укажите период');
+  const row = db.prepare('SELECT COUNT(*) AS cnt FROM spend_records WHERE date BETWEEN ? AND ?').get(from, to);
+  res.json({ count: row.cnt });
+});
+
+app.get('/api/import/chatterfy/count', adminBuyer, (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return err(res, 400, 'Укажите период');
+  const row = db.prepare('SELECT COUNT(*) AS cnt FROM chatterfy_records WHERE date BETWEEN ? AND ?').get(from, to);
+  res.json({ count: row.cnt });
+});
+
 app.delete('/api/import/spend/bulk', adminBuyer, (req, res) => {
   const { from, to } = req.body;
   if (!from || !to) return err(res, 400, 'Укажите период');

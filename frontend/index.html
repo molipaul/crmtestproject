@@ -81,8 +81,10 @@
     </button>
   </nav>
 
-  <div class="sidebar-section-label">СЛОВАРИ</div>
-  <nav>
+  <div class="sidebar-section-label role-adminbuyer" style="cursor:pointer;user-select:none" onclick="toggleNavGroup('dict')">
+    СЛОВАРИ <i class="bi bi-chevron-down nav-chevron" id="navChevronDict" style="font-size:.65rem;transition:transform .2s"></i>
+  </div>
+  <nav class="nav-group" id="navGroupDict">
     <button class="nav-btn role-adminbuyer" data-section="dictionaries" data-dict-target="geos">
       <i class="bi bi-globe2"></i><span>Гео</span>
     </button>
@@ -98,8 +100,10 @@
     </button>
   </nav>
 
-  <div class="sidebar-section-label">ИМПОРТ</div>
-  <nav>
+  <div class="sidebar-section-label role-adminbuyer" style="cursor:pointer;user-select:none" onclick="toggleNavGroup('import')">
+    ИМПОРТ <i class="bi bi-chevron-down nav-chevron" id="navChevronImport" style="font-size:.65rem;transition:transform .2s"></i>
+  </div>
+  <nav class="nav-group" id="navGroupImport">
     <button class="nav-btn role-adminbuyer" data-section="imports" data-import-target="spend">
       <i class="bi bi-currency-dollar"></i><span>FBtool спенды</span>
     </button>
@@ -263,9 +267,9 @@
 
       <!-- Range mode: from–to + geo -->
       <div id="statsFilterRange" class="d-flex gap-2 align-items-center flex-wrap">
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsFrom" onchange="App.Stats.load()" title="С" />
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsFrom" onchange="App.Stats.clearShortcuts()" title="С" />
         <span class="text-muted small">—</span>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsTo" onchange="App.Stats.load()" title="По" />
+        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsTo" onchange="App.Stats.clearShortcuts()" title="По" />
         <select class="form-select form-select-sm w-auto" id="statsGeoFilter" title="Фильтр по гео">
           <option value="">Все гео</option>
         </select>

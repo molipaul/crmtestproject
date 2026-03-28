@@ -2,6 +2,27 @@
 
 const API = '';
 
+// ─── NAV GROUP TOGGLE ─────────────────────────────────────────────────────────
+function toggleNavGroup(id) {
+  const group = document.getElementById(`navGroup${id.charAt(0).toUpperCase()+id.slice(1)}`);
+  const chevron = document.getElementById(`navChevron${id.charAt(0).toUpperCase()+id.slice(1)}`);
+  if (!group) return;
+  group.classList.toggle('collapsed');
+  if (chevron) chevron.classList.toggle('rotated');
+  localStorage.setItem(`navGroup_${id}`, group.classList.contains('collapsed') ? '0' : '1');
+}
+function restoreNavGroups() {
+  ['dict','import'].forEach(id => {
+    const state = localStorage.getItem(`navGroup_${id}`);
+    if (state === '0') {
+      const group = document.getElementById(`navGroup${id.charAt(0).toUpperCase()+id.slice(1)}`);
+      const chevron = document.getElementById(`navChevron${id.charAt(0).toUpperCase()+id.slice(1)}`);
+      if (group) group.classList.add('collapsed');
+      if (chevron) chevron.classList.add('rotated');
+    }
+  });
+}
+
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 
 function getToken() {
@@ -151,7 +172,9 @@ App.Auth = {
     document.getElementById('userRoleBadge').textContent =
       { admin: 'Admin', buyer: 'Buyer', operator: 'Operator' }[user.role] || user.role;
 
+    window._initialHash = location.hash.slice(1); // save before setupRoleUI overwrites it
     setupRoleUI(user.role);
+    restoreNavGroups();
     showApp();
     initApp(user);
   },
@@ -171,8 +194,20 @@ function setupRoleUI(role) {
     else if (role === 'operator' && cls.contains('role-adminoperator')) visible = true;
     btn.classList.toggle('d-none', !visible);
   });
-  // Hide empty sidebar section labels
+  // Hide empty sidebar section labels (check role class on label itself and children visibility)
   document.querySelectorAll('.sidebar-section-label').forEach(label => {
+    const cls = label.classList;
+    const hasRoleClass = cls.contains('role-admin') || cls.contains('role-adminbuyer') || cls.contains('role-adminoperator');
+    if (hasRoleClass) {
+      let visible = false;
+      if (role === 'admin') visible = true;
+      else if (role === 'buyer' && cls.contains('role-adminbuyer')) visible = true;
+      else if (role === 'operator' && cls.contains('role-adminoperator')) visible = true;
+      label.classList.toggle('d-none', !visible);
+      const nav = label.nextElementSibling;
+      if (nav) nav.classList.toggle('d-none', !visible);
+      return;
+    }
     const nav = label.nextElementSibling;
     if (nav?.tagName === 'NAV') {
       const hasVisible = [...nav.querySelectorAll('.nav-btn')].some(b => !b.classList.contains('d-none'));
@@ -180,11 +215,13 @@ function setupRoleUI(role) {
     }
   });
 
-  // Show first visible section
-  const firstVisible = document.querySelector('.nav-btn[data-section]:not(.d-none)');
-  if (firstVisible) {
-    showSection(firstVisible.dataset.section);
-    if (firstVisible.dataset.dictTarget) switchDict(firstVisible.dataset.dictTarget);
+  // Show first visible section; hash-routing runs later in initApp
+  if (!window._initialHash) {
+    const firstVisible = document.querySelector('.nav-btn[data-section]:not(.d-none)');
+    if (firstVisible) {
+      showSection(firstVisible.dataset.section);
+      if (firstVisible.dataset.dictTarget) switchDict(firstVisible.dataset.dictTarget);
+    }
   }
 }
 
@@ -239,7 +276,8 @@ async function checkUndefined() {
 
 const allSections = ['dictionaries', 'statistics', 'deposits', 'imports', 'dashboard', 'users', 'pl', 'activitylog', 'pending'];
 
-function showSection(name) {
+function showSection(name, skipHash) {
+  if (!skipHash) history.replaceState(null, '', '#' + name);
   allSections.forEach(s => {
     const el = document.getElementById(`section-${s}`);
     if (!el) return;
@@ -293,12 +331,24 @@ function _updateBreadcrumbSub(text) {
 }
 
 document.querySelectorAll('.nav-btn[data-section]').forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (e) => {
+    // Ctrl+Click or middle-click → open in new tab
+    if (e.ctrlKey || e.metaKey) {
+      window.open(location.pathname + '#' + btn.dataset.section, '_blank');
+      return;
+    }
     window._lastClickedNavBtn = btn;
     showSection(btn.dataset.section);
     // Direct sub-section navigation from sidebar
     if (btn.dataset.dictTarget) { switchDict(btn.dataset.dictTarget); _updateBreadcrumbSub(btn.querySelector('span')?.textContent); }
     if (btn.dataset.importTarget) { switchImport(btn.dataset.importTarget); _updateBreadcrumbSub(btn.querySelector('span')?.textContent); }
+  });
+  // Middle mouse button → open in new tab
+  btn.addEventListener('auxclick', (e) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      window.open(location.pathname + '#' + btn.dataset.section, '_blank');
+    }
   });
 });
 
@@ -314,6 +364,10 @@ function switchDict(name) {
   });
   document.querySelectorAll('#dictTab .nav-link').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.dict === name);
+  });
+  // Sync sidebar active state
+  document.querySelectorAll('.nav-btn[data-dict-target]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.dictTarget === name);
   });
   if (name === 'geos') App.Geos.load();
   if (name === 'agents') App.Agents.load();
@@ -342,6 +396,10 @@ function switchImport(name) {
   });
   document.querySelectorAll('#importTab .nav-link').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.import === name);
+  });
+  // Sync sidebar active state
+  document.querySelectorAll('.nav-btn[data-import-target]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.importTarget === name);
   });
   if (name === 'cabinets') App.Cabinets.load();
   if (name === 'spend') App.Import.loadSpendHistory();
@@ -390,6 +448,18 @@ async function initApp(user) {
   });
   const agentFilterEl = document.getElementById('statsAgentFilter');
   if (agentFilterEl) agentFilterEl.addEventListener('change', () => { if (App.Stats.data.length) App.Stats.render(App.Stats.data); });
+
+  // Hash-routing: navigate to section from URL hash (after state is loaded)
+  const hash = window._initialHash || location.hash.slice(1);
+  delete window._initialHash;
+  if (hash && allSections.includes(hash)) {
+    const hashBtn = document.querySelector(`.nav-btn[data-section="${hash}"]:not(.d-none)`);
+    if (hashBtn) {
+      showSection(hash);
+      if (hashBtn.dataset.dictTarget) switchDict(hashBtn.dataset.dictTarget);
+      if (hashBtn.dataset.importTarget) switchImport(hashBtn.dataset.importTarget);
+    }
+  }
 }
 
 // ─── GEOS ─────────────────────────────────────────────────────────────────────
@@ -799,7 +869,10 @@ App.Stats = {
     document.querySelectorAll('.date-shortcut').forEach(el => el.classList.remove('active'));
     event?.target?.classList.add('active');
     this._activeShortcut = type;
-    this.load();
+  },
+  clearShortcuts() {
+    document.querySelectorAll('.date-shortcut').forEach(el => el.classList.remove('active'));
+    this._activeShortcut = null;
   },
 
   async load() {
@@ -897,8 +970,8 @@ App.Stats = {
         const va = rA[c.key];
         const vb = rB[c.key];
         const main = this.fmtCell(c, va);
-        if (c.type === 'text') return `<td class="${c.align} stat-number">${main}</td>`;
-        return `<td class="${c.align} stat-number">${main}${this._fmtDelta(c, va, vb)}</td>`;
+        if (c.type === 'text') return `<td class="${c.align} stat-number" style="white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis">${main}</td>`;
+        return `<td class="${c.align} stat-number" style="white-space:nowrap">${main}${this._fmtDelta(c, va, vb)}</td>`;
       }).join('')}</tr>`;
     }).join('');
   },
@@ -986,7 +1059,7 @@ App.Stats = {
       case 'text': return v || '—';
       case 'int': return fmtInt(v);
       case 'usd': return v > 0 ? `$${fmt(v)}` : '<span class="text-muted">—</span>';
-      case 'pct': return v > 0 ? `<span class="${pctClass(v)}">${fmt(v,1)}%</span>` : '<span class="text-muted">—</span>';
+      case 'pct': return v > 0 ? `${fmt(v,1)}%` : '<span class="text-muted">—</span>';
       case 'pct1': return `${fmt(v,1)}%`;
       case 'roi': return `<span class="${roiClass(v)}">${fmt(v,1)}%</span>`;
       case 'profit': return `<span class="${v>0?'roi-positive':v<0?'roi-negative':''}">${v>0?'+':''}$${fmt(Math.abs(v))}</span>`;
@@ -1695,8 +1768,10 @@ App.Import = {
     if (!from) return;
     const to = prompt('Удалить спенды ПО дату (YYYY-MM-DD):');
     if (!to) return;
-    if (!confirm(`Удалить все спенды за ${from} — ${to}?`)) return;
     try {
+      const cnt = await apiFetch(`/api/import/spend/count?from=${from}&to=${to}`);
+      if (!cnt.count) return toast('Нет записей за этот период', 'warning');
+      if (!confirm(`Удалить ${cnt.count} записей спендов за ${from} — ${to}? Это действие необратимо.`)) return;
       const res = await apiFetch('/api/import/spend/bulk', { method: 'DELETE', body: JSON.stringify({ from, to }) });
       toast(`Удалено: ${res.deleted} записей`);
       await this.loadSpendHistory();
@@ -1708,8 +1783,10 @@ App.Import = {
     if (!from) return;
     const to = prompt('Удалить записи Chatterfy ПО дату (YYYY-MM-DD):');
     if (!to) return;
-    if (!confirm(`Удалить все записи Chatterfy за ${from} — ${to}?`)) return;
     try {
+      const cnt = await apiFetch(`/api/import/chatterfy/count?from=${from}&to=${to}`);
+      if (!cnt.count) return toast('Нет записей за этот период', 'warning');
+      if (!confirm(`Удалить ${cnt.count} записей Chatterfy за ${from} — ${to}? Это действие необратимо.`)) return;
       const res = await apiFetch('/api/import/chatterfy/bulk', { method: 'DELETE', body: JSON.stringify({ from, to }) });
       toast(`Удалено: ${res.deleted} записей`);
       await this.loadChatterfyHistory();
