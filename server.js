@@ -202,6 +202,28 @@ db.exec(`
 `);
 try { db.exec("ALTER TABLE adsets ADD COLUMN offer_id INTEGER REFERENCES offers(id)"); } catch {}
 
+// Migration: creatives unique per geo (not globally unique name)
+// Migrate creatives: change UNIQUE(name) to UNIQUE(name, geo_id)
+try {
+  const hasAutoIdx = db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='sqlite_autoindex_creatives_1'").get();
+  if (hasAutoIdx) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS creatives_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        geo_id INTEGER REFERENCES geos(id)
+      );
+      INSERT OR IGNORE INTO creatives_new SELECT * FROM creatives;
+      DROP TABLE IF EXISTS creatives;
+      ALTER TABLE creatives_new RENAME TO creatives;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_creatives_name_geo ON creatives(name, geo_id);
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+} catch(e) { console.log('Creatives migration:', e.message); db.pragma('foreign_keys = ON'); }
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_creatives_name_geo ON creatives(name, geo_id)"); } catch {}
+
 // Deleted records (recycle bin)
 db.exec(`CREATE TABLE IF NOT EXISTS deleted_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -427,6 +449,17 @@ function parseAdsetName(name, geos, agents) {
   return { geoMatch, agentMatch };
 }
 
+function matchCreative(adsetName, geo_id) {
+  if (!geo_id) return null;
+  // Find creatives for this geo, try matching by name substring in adset name (longest first)
+  const creatives = db.prepare('SELECT * FROM creatives WHERE geo_id = ? ORDER BY length(name) DESC').all(geo_id);
+  const upper = adsetName.toUpperCase();
+  for (const c of creatives) {
+    if (upper.includes(c.name.toUpperCase())) return c.id;
+  }
+  return null;
+}
+
 function resolveAdset(name) {
   let row = db.prepare('SELECT * FROM adsets WHERE name = ?').get(name);
   if (row) return row;
@@ -435,9 +468,10 @@ function resolveAdset(name) {
   const { geoMatch, agentMatch } = parseAdsetName(name, geos, agents);
   const geo_id = geoMatch ? geoMatch.id : null;
   const agent_id = agentMatch ? agentMatch.id : null;
+  const creative_id = matchCreative(name, geo_id);
 
   const is_undefined = (geo_id && agent_id) ? 0 : 1;
-  db.prepare('INSERT OR IGNORE INTO adsets (name, creative_id, geo_id, agent_id, is_undefined) VALUES (?, ?, ?, ?, ?)').run(name, null, geo_id, agent_id, is_undefined);
+  db.prepare('INSERT OR IGNORE INTO adsets (name, creative_id, geo_id, agent_id, is_undefined) VALUES (?, ?, ?, ?, ?)').run(name, creative_id, geo_id, agent_id, is_undefined);
   return db.prepare('SELECT * FROM adsets WHERE name = ?').get(name);
 }
 
@@ -600,11 +634,11 @@ app.post('/api/creatives', adminBuyer, (req, res) => {
   const { name, geo_id } = req.body;
   if (!name) return err(res, 400, 'Введите название');
   try {
-    db.prepare('INSERT INTO creatives (name, geo_id) VALUES (?, ?)').run(name, geo_id || null);
+    const result = db.prepare('INSERT INTO creatives (name, geo_id) VALUES (?, ?)').run(name, geo_id || null);
     logActivity(req.user.id, req.user.username, 'creative_create', name);
-    res.json(db.prepare('SELECT * FROM creatives WHERE name = ?').get(name));
+    res.json(db.prepare('SELECT * FROM creatives WHERE id = ?').get(result.lastInsertRowid));
   } catch (e) {
-    if (e.message.includes('UNIQUE')) return err(res, 400, 'Креатив с таким названием уже существует');
+    if (e.message.includes('UNIQUE')) return err(res, 400, 'Креатив с таким названием уже существует для этого гео');
     err(res, 500, e.message);
   }
 });
@@ -612,9 +646,14 @@ app.post('/api/creatives', adminBuyer, (req, res) => {
 app.put('/api/creatives/:id', adminBuyer, (req, res) => {
   const { name, geo_id } = req.body;
   const old = db.prepare('SELECT * FROM creatives WHERE id = ?').get(req.params.id);
-  db.prepare('UPDATE creatives SET name = ?, geo_id = ? WHERE id = ?').run(name, geo_id || null, req.params.id);
-  if (old) trackChanges('creatives', req.params.id, old, { name, geo_id: geo_id || null }, req.user.id, req.user.username);
-  res.json({ ok: true });
+  try {
+    db.prepare('UPDATE creatives SET name = ?, geo_id = ? WHERE id = ?').run(name, geo_id || null, req.params.id);
+    if (old) trackChanges('creatives', req.params.id, old, { name, geo_id: geo_id || null }, req.user.id, req.user.username);
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return err(res, 400, 'Креатив с таким названием уже существует для этого гео');
+    err(res, 500, e.message);
+  }
 });
 
 app.delete('/api/creatives/:id', adminBuyer, (req, res) => {
@@ -638,7 +677,7 @@ app.get('/api/adsets', anyAuth, (req, res) => {
   const params = [];
   if (geo_id) { q += ' AND a.geo_id = ?'; params.push(parseInt(geo_id)); }
   if (creative_id) { q += ' AND a.creative_id = ?'; params.push(parseInt(creative_id)); }
-  if (undefined_only === 'true') { q += ' AND a.is_undefined = 1'; }
+  if (undefined_only === 'true') { q += ' AND (a.is_undefined = 1 OR a.creative_id IS NULL)'; }
   q += ' ORDER BY a.name';
   res.json(db.prepare(q).all(...params));
 });
@@ -1053,6 +1092,9 @@ app.post('/api/import/chatterfy', adminBuyer, (req, res) => {
       const regs = parseInt(parts[3]) || 0;
       const deps = parseInt(parts[4]) || 0;
       const redeps = parseInt(parts[5]) || 0;
+      // Skip garbage rows (totals, template variables, empty, all-zero)
+      if (!adset_name || adset_name.toLowerCase().includes('total') || adset_name.includes('{{') || adset_name.includes('}}')) continue;
+      if (pdp === 0 && dia === 0 && regs === 0 && deps === 0 && redeps === 0) continue;
       const existing = checkDup.get(adset_name, date);
       if (existing) {
         duplicates++;
@@ -1172,6 +1214,9 @@ app.post('/api/import/chatterfy-csv', adminBuyer, (req, res) => {
         const reg = parseNum(parts[idx.registrations]);
         const fd  = parseNum(parts[idx.fd]);
         const rd  = parseNum(parts[idx.rd]);
+        // Skip garbage rows (totals, template variables, all-zero)
+        if (adset_name.toLowerCase().includes('total') || adset_name.includes('{{') || adset_name.includes('}}')) continue;
+        if (sub === 0 && dia === 0 && reg === 0 && fd === 0 && rd === 0) continue;
         const existing = checkDup.get(adset_name, date);
         if (existing) {
           duplicates++;
@@ -1550,15 +1595,16 @@ app.post('/api/adsets/re-parse', adminBuyer, (req, res) => {
   const agents = db.prepare('SELECT * FROM agents').all();
   const adsets = db.prepare('SELECT * FROM adsets').all();
   let updated = 0;
-  const update = db.prepare('UPDATE adsets SET geo_id = ?, agent_id = ?, is_undefined = ? WHERE id = ?');
+  const update = db.prepare('UPDATE adsets SET geo_id = ?, agent_id = ?, creative_id = COALESCE(creative_id, ?), is_undefined = ? WHERE id = ?');
   db.transaction(() => {
     for (const a of adsets) {
       const { geoMatch, agentMatch } = parseAdsetName(a.name, geos, agents);
       const geo_id = geoMatch ? geoMatch.id : null;
       const agent_id = agentMatch ? agentMatch.id : null;
+      const creative_id = matchCreative(a.name, geo_id);
       const is_undefined = (geo_id && agent_id) ? 0 : 1;
-      if (a.geo_id !== geo_id || a.agent_id !== agent_id) {
-        update.run(geo_id, agent_id, is_undefined, a.id);
+      if (a.geo_id !== geo_id || a.agent_id !== agent_id || (!a.creative_id && creative_id)) {
+        update.run(geo_id, agent_id, creative_id, is_undefined, a.id);
         updated++;
       }
     }
