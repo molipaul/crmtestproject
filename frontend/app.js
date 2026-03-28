@@ -309,7 +309,7 @@ document.getElementById('undefinedBadge').addEventListener('click', () => {
 
 // Dict sub-tabs
 function switchDict(name) {
-  ['geos','agents','creatives','undefined','patterns'].forEach(d => {
+  ['geos','agents','creatives','undefined'].forEach(d => {
     document.getElementById(`dict-${d}`)?.classList.toggle('d-none', d !== name);
   });
   document.querySelectorAll('#dictTab .nav-link').forEach(btn => {
@@ -319,7 +319,6 @@ function switchDict(name) {
   if (name === 'agents') App.Agents.load();
   if (name === 'creatives') App.Creatives.load();
   if (name === 'undefined') App.Undefined.load();
-  if (name === 'patterns') App.Patterns.load();
 }
 document.querySelectorAll('#dictTab .nav-link').forEach(btn => {
   btn.addEventListener('click', () => switchDict(btn.dataset.dict));
@@ -1132,19 +1131,19 @@ App.Stats = {
       if (totals.dialogs > 0 && totals.registrations > 0) totals.pct_dia_reg = +(totals.registrations/totals.dialogs*100).toFixed(1);
       if (totals.registrations > 0 && totals.deposits_count > 0) totals.pct_reg_dep = +(totals.deposits_count/totals.registrations*100).toFixed(1);
       if (totals.deposits_count > 0 && totals.redeposits_count > 0) totals.pct_dep_redep = +(totals.redeposits_count/totals.deposits_count*100).toFixed(1);
-      html += `<tr class="fw-bold" style="background:#f0f4ff;position:sticky;bottom:0">${cols.map((c, i) => {
+      const totalsHtml = `<tr class="fw-bold" style="background:#f0f4ff;position:sticky;top:0;z-index:2">${cols.map((c, i) => {
         if (i === 0) return `<td class="${c.align}">ИТОГО (${data.length})</td>`;
         if (c.type === 'text') return '<td></td>';
         const v = totals[c.key] ?? 0;
         return `<td class="${c.align} stat-number">${this.fmtCell(c, v)}</td>`;
       }).join('')}</tr>`;
-      tb.innerHTML = html;
+      tb.innerHTML = totalsHtml + html;
     };
 
     container.innerHTML = `
       <div style="overflow-x:auto;max-height:75vh">
         <table class="table table-sm table-hover crm-table" id="statsTable" style="min-width:max-content">
-          <thead><tr>${cols.map(c =>
+          <thead style="position:sticky;top:0;z-index:3"><tr>${cols.map(c =>
             `<th class="sortable ${c.align}" data-key="${c.key}" style="white-space:nowrap">${c.label}</th>`
           ).join('')}</tr></thead>
           <tbody id="statsTbody"></tbody>
@@ -1449,7 +1448,11 @@ App.Deposits = {
         <td>${btnIcon('trash','Удалить',`App.Deposits.del(${r.id})`,true)}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="text-center text-muted py-3">Нет депозитов</td></tr>';
     } else {
-      tb.innerHTML = rows.map(r => `<tr>
+      const me = getUser();
+      const isBuyer = me?.role === 'buyer';
+      tb.innerHTML = rows.map(r => {
+        const canDel = !isBuyer || (isPending(r) && r.created_by === me?.id);
+        return `<tr>
         <td>${r.date}</td>
         <td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
         <td>${r.creative_name||'—'}</td>
@@ -1458,8 +1461,9 @@ App.Deposits = {
         <td class="text-end stat-number fw-semibold">${isPending(r) ? '<span class="text-muted">—</span>' : '$'+fmt(r.amount)}</td>
         <td>${isPending(r) ? '<span class="badge bg-warning text-dark">Pending</span>' : '<span class="badge bg-success">Подтверждён</span>'}</td>
         <td>${r.agent_name||'—'}</td>
-        <td>${btnIcon('trash','Удалить',`App.Deposits.del(${r.id})`,true)}</td>
-      </tr>`).join('') || '<tr><td colspan="9" class="text-center text-muted py-3">Нет депозитов</td></tr>';
+        <td>${canDel ? btnIcon('trash','Удалить',`App.Deposits.del(${r.id})`,true) : ''}</td>
+      </tr>`;
+      }).join('') || '<tr><td colspan="9" class="text-center text-muted py-3">Нет депозитов</td></tr>';
     }
   },
   async del(id) {
@@ -1573,7 +1577,20 @@ App.Import = {
       cabs.map(c=>`<option value="${c.id}">${c.name} (${c.account_id})</option>`).join('');
     const fbSel = document.getElementById('fbCabinet');
     fbSel.innerHTML = cabs.filter(c => c.access_token).map(c => `<option value="${c.id}">${c.name} (${c.account_id})</option>`).join('') || '<option value="">Нет кабинетов с токеном</option>';
+    // Restore FBTool fields from localStorage
+    const savedKey = localStorage.getItem('fbtool_api_key');
+    const savedAccounts = localStorage.getItem('fbtool_accounts');
+    if (savedKey) document.getElementById('fbtoolApiKey').value = savedKey;
+    if (savedAccounts) document.getElementById('fbtoolAccounts').value = savedAccounts;
     await this.loadSpendHistory();
+  },
+  async autoFillFBToolAccounts() {
+    try {
+      const cabs = await apiFetch('/api/cabinets');
+      const ids = cabs.filter(c => c.is_active).map(c => c.account_id).join(', ');
+      document.getElementById('fbtoolAccounts').value = ids;
+      toast('Аккаунты заполнены из кабинетов');
+    } catch(e) { toast(e.message,'danger'); }
   },
   async processSpend() {
     const date = document.getElementById('spendDate').value;
@@ -1712,6 +1729,9 @@ App.Import = {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Загрузка...';
     try {
       const res = await apiFetch('/api/import/fbtool-spend', { method: 'POST', body: JSON.stringify({ api_key, account_ids, date_from, date_to }) });
+      // Save to localStorage on success
+      localStorage.setItem('fbtool_api_key', api_key);
+      localStorage.setItem('fbtool_accounts', accountsStr);
       const warn = res.undefined_adsets?.length;
       toast(`FBTool: загружено ${res.imported}${warn ? `. Неопред.: ${res.undefined_adsets.length}` : ''}`, warn ? 'warning' : 'success');
       await this.loadSpendHistory();
@@ -2372,96 +2392,6 @@ App.Expenses = {
   },
 };
 
-// ─── ADSET PATTERNS ──────────────────────────────────────────────────────────
-
-App.Patterns = {
-  data: [],
-  async load() {
-    this.data = await apiFetch('/api/adset-patterns');
-    const geoRows  = this.data.filter(p => p.entity_type === 'geo');
-    const agentRows = this.data.filter(p => p.entity_type === 'agent');
-    const renderList = (rows, containerId) => {
-      const el = document.getElementById(containerId);
-      if (!el) return;
-      el.innerHTML = rows.length ? rows.map(p => `
-        <div class="pattern-tag">
-          <span class="re">${p.pattern}</span>
-          <span class="text-muted">→</span>
-          <span class="fw-medium">${p.entity_name}</span>
-          <span class="text-muted small">(p:${p.priority})</span>
-          <span>${btnIcon('pencil','Ред.',`App.Patterns.openEdit(${p.id})`)}${btnIcon('trash','Удалить',`App.Patterns.del(${p.id})`,true)}</span>
-        </div>`).join('') : '<p class="text-muted small p-2 mb-0">Нет паттернов</p>';
-    };
-    renderList(geoRows, 'patternsGeoList');
-    renderList(agentRows, 'patternsAgentList');
-  },
-  async _fillEntitySelect(type) {
-    const ep = type === 'geo' ? '/api/geos' : type === 'agent' ? '/api/agents' : '/api/creatives';
-    const items = await apiFetch(ep);
-    setSelectOpts('patternEntityId', items.map(i => `<option value="${i.id}">${i.name}</option>`).join(''));
-  },
-  openAdd() {
-    document.getElementById('patternId').value = '';
-    document.getElementById('patternRegex').value = '';
-    document.getElementById('patternPriority').value = '0';
-    document.getElementById('patternType').value = 'geo';
-    this._fillEntitySelect('geo');
-    document.getElementById('patternType').onchange = e => this._fillEntitySelect(e.target.value);
-    new bootstrap.Modal('#patternModal').show();
-  },
-  openEdit(id) {
-    const p = this.data.find(x => x.id === id);
-    if (!p) return;
-    document.getElementById('patternId').value = p.id;
-    document.getElementById('patternRegex').value = p.pattern;
-    document.getElementById('patternPriority').value = p.priority;
-    document.getElementById('patternType').value = p.entity_type;
-    this._fillEntitySelect(p.entity_type).then(() => {
-      document.getElementById('patternEntityId').value = p.entity_id;
-    });
-    document.getElementById('patternType').onchange = e => this._fillEntitySelect(e.target.value);
-    new bootstrap.Modal('#patternModal').show();
-  },
-  async save() {
-    const id = document.getElementById('patternId').value;
-    const body = {
-      entity_type: document.getElementById('patternType').value,
-      pattern: document.getElementById('patternRegex').value.trim(),
-      entity_id: +document.getElementById('patternEntityId').value,
-      priority: +document.getElementById('patternPriority').value || 0,
-    };
-    if (!body.pattern || !body.entity_id) return toast('Заполните все поля','warning');
-    try {
-      if (id) await apiFetch(`/api/adset-patterns/${id}`,{method:'PUT',body:JSON.stringify(body)});
-      else await apiFetch('/api/adset-patterns',{method:'POST',body:JSON.stringify(body)});
-      bootstrap.Modal.getInstance('#patternModal')?.hide();
-      toast('Паттерн сохранён'); await this.load();
-    } catch(e) { toast(e.message,'danger'); }
-  },
-  async del(id) {
-    if (!confirm('Удалить паттерн?')) return;
-    try { await apiFetch(`/api/adset-patterns/${id}`,{method:'DELETE'}); toast('Удалено'); await this.load(); }
-    catch(e) { toast(e.message,'danger'); }
-  },
-  async testPattern() {
-    const name = document.getElementById('patternTestInput')?.value.trim();
-    if (!name) return;
-    try {
-      const result = await apiFetch(`/api/adset-patterns/test?name=${encodeURIComponent(name)}`);
-      const el = document.getElementById('patternTestResult');
-      el.innerHTML = `<span class="badge ${result.geo ? 'bg-success' : 'bg-danger'} me-1">Гео: ${result.geo ? result.geo.name + ' (' + result.geo.abbreviation + ')' : 'не определено'}</span>
-        <span class="badge ${result.agent ? 'bg-success' : 'bg-danger'}">Агент: ${result.agent ? result.agent.name + ' (' + result.agent.abbreviation + ')' : 'не определено'}</span>`;
-    } catch(e) { toast(e.message,'danger'); }
-  },
-  async reParse() {
-    if (!confirm('Перепарсить все адсеты по текущим паттернам? Это обновит гео и агентство.')) return;
-    try {
-      const res = await apiFetch('/api/adset-patterns/re-parse', { method: 'POST' });
-      toast(`Обновлено: ${res.updated} из ${res.total}`, res.updated > 0 ? 'success' : 'warning');
-      checkUndefined();
-    } catch(e) { toast(e.message, 'danger'); }
-  },
-};
 
 // ─── EXPENSE CATEGORIES ───────────────────────────────────────────────────────
 

@@ -96,9 +96,6 @@
       <i class="bi bi-question-circle"></i><span>Нераспознанные</span>
       <span id="undefinedBadge" class="sidebar-badge d-none"><span id="undefinedCount">0</span></span>
     </button>
-    <button class="nav-btn role-adminbuyer" data-section="dictionaries" data-dict-target="patterns">
-      <i class="bi bi-regex"></i><span>Паттерны</span>
-    </button>
   </nav>
 
   <div class="sidebar-section-label">ИМПОРТ</div>
@@ -143,7 +140,6 @@
       <li class="nav-item"><button class="nav-link" data-dict="agents"><i class="bi bi-people me-1"></i>Агенты</button></li>
       <li class="nav-item"><button class="nav-link" data-dict="creatives"><i class="bi bi-layers me-1"></i>Креативы</button></li>
       <li class="nav-item"><button class="nav-link" data-dict="undefined"><i class="bi bi-question-circle me-1"></i>Неопределённые</button></li>
-      <li class="nav-item"><button class="nav-link" data-dict="patterns"><i class="bi bi-regex me-1"></i>Паттерны</button></li>
     </ul>
 
     <div id="dict-geos">
@@ -232,43 +228,6 @@
       </div>
     </div>
 
-    <div id="dict-patterns" class="d-none">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <div>
-          <h6 class="mb-0 text-muted">Паттерны распознавания адсетов</h6>
-          <p class="text-muted small mb-0">Regex-правила для автоматического определения Гео и Агентства из имени адсета при импорте</p>
-        </div>
-        <div class="d-flex gap-2">
-          <button class="btn btn-sm btn-outline-warning" onclick="App.Patterns.reParse()"><i class="bi bi-arrow-repeat me-1"></i>Обновить словарь</button>
-          <button class="btn btn-sm btn-primary" onclick="App.Patterns.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить паттерн</button>
-        </div>
-      </div>
-      <!-- Test pattern -->
-      <div class="card mb-3">
-        <div class="card-body py-2">
-          <div class="d-flex align-items-center gap-2">
-            <i class="bi bi-bug text-muted"></i>
-            <input type="text" class="form-control form-control-sm" id="patternTestInput" placeholder="Введите имя адсета для теста (напр. AR2cdn213B1L1GenMY5)" style="max-width:400px" onkeydown="if(event.key==='Enter')App.Patterns.testPattern()" />
-            <button class="btn btn-sm btn-outline-primary" onclick="App.Patterns.testPattern()">Тест</button>
-            <span id="patternTestResult"></span>
-          </div>
-        </div>
-      </div>
-      <div class="row g-3">
-        <div class="col-md-6">
-          <div class="card">
-            <div class="card-header py-2 fw-semibold"><i class="bi bi-globe2 me-1 text-info"></i>Паттерны Гео</div>
-            <div class="card-body p-2" id="patternsGeoList"></div>
-          </div>
-        </div>
-        <div class="col-md-6">
-          <div class="card">
-            <div class="card-header py-2 fw-semibold"><i class="bi bi-people me-1 text-warning"></i>Паттерны Агентств</div>
-            <div class="card-body p-2" id="patternsAgentList"></div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- ══════════════ STATISTICS ══════════════ -->
@@ -531,7 +490,33 @@
     <div id="import-spend">
       <div class="row g-3">
         <div class="col-lg-5">
+          <!-- FBTool.pro Import -->
           <div class="card">
+            <div class="card-header py-2 fw-semibold"><i class="bi bi-tools me-1 text-warning"></i>Импорт из FBTool.pro</div>
+            <div class="card-body">
+              <div class="mb-2">
+                <label class="form-label small">API Key</label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolApiKey" placeholder="kV8jecAeAL..." />
+              </div>
+              <div class="mb-2">
+                <label class="form-label small d-flex justify-content-between">ID аккаунтов (через запятую)
+                  <button class="btn btn-link btn-sm p-0 text-muted" onclick="App.Import.autoFillFBToolAccounts()" title="Заполнить из кабинетов"><i class="bi bi-arrow-repeat"></i> Из кабинетов</button>
+                </label>
+                <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolAccounts" placeholder="18850199, 18865827, ..." />
+              </div>
+              <div class="mb-2 d-flex gap-2">
+                <div class="flex-fill"><label class="form-label small">С</label>
+                  <input type="date" class="form-control form-control-sm" id="fbtoolDateFrom" /></div>
+                <div class="flex-fill"><label class="form-label small">По</label>
+                  <input type="date" class="form-control form-control-sm" id="fbtoolDateTo" /></div>
+              </div>
+              <button class="btn btn-outline-warning btn-sm w-100" id="fbtoolImportBtn" onclick="App.Import.importFromFBTool()">
+                <i class="bi bi-cloud-download me-1"></i>Загрузить из FBTool.pro
+              </button>
+            </div>
+          </div>
+          <!-- Manual spend upload -->
+          <div class="card mt-3">
             <div class="card-header py-2 fw-semibold"><i class="bi bi-upload me-1 text-primary"></i>Загрузить спенды</div>
             <div class="card-body">
               <div class="mb-2">
@@ -566,29 +551,6 @@
               </div>
               <button class="btn btn-outline-primary btn-sm w-100" id="fbImportBtn" onclick="App.Import.importFromFB()">
                 <i class="bi bi-cloud-download me-1"></i>Загрузить из FB API
-              </button>
-            </div>
-          </div>
-          <!-- FBTool.pro Import -->
-          <div class="card mt-3">
-            <div class="card-header py-2 fw-semibold"><i class="bi bi-tools me-1 text-warning"></i>Импорт из FBTool.pro</div>
-            <div class="card-body">
-              <div class="mb-2">
-                <label class="form-label small">API Key</label>
-                <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolApiKey" placeholder="kV8jecAeAL..." />
-              </div>
-              <div class="mb-2">
-                <label class="form-label small">ID аккаунтов (через запятую)</label>
-                <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolAccounts" placeholder="18850199, 18865827, ..." />
-              </div>
-              <div class="mb-2 d-flex gap-2">
-                <div class="flex-fill"><label class="form-label small">С</label>
-                  <input type="date" class="form-control form-control-sm" id="fbtoolDateFrom" /></div>
-                <div class="flex-fill"><label class="form-label small">По</label>
-                  <input type="date" class="form-control form-control-sm" id="fbtoolDateTo" /></div>
-              </div>
-              <button class="btn btn-outline-warning btn-sm w-100" id="fbtoolImportBtn" onclick="App.Import.importFromFBTool()">
-                <i class="bi bi-cloud-download me-1"></i>Загрузить из FBTool.pro
               </button>
             </div>
           </div>
@@ -1092,35 +1054,6 @@
   </div>
 </div>
 
-<!-- PATTERN MODAL -->
-<div class="modal fade" id="patternModal" tabindex="-1">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <div class="modal-header py-2"><h6 class="modal-title">Паттерн распознавания</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body">
-        <input type="hidden" id="patternId" />
-        <div class="mb-2"><label class="form-label small">Тип</label>
-          <select class="form-select form-select-sm" id="patternType">
-            <option value="geo">Гео</option>
-            <option value="agent">Агентство</option>
-            <option value="creative">Креатив</option>
-          </select></div>
-        <div class="mb-2"><label class="form-label small">Regex паттерн</label>
-          <input type="text" class="form-control form-control-sm font-monospace" id="patternRegex"
-            placeholder="(?i)cdn|^[0-9]+" /></div>
-        <div class="mb-2"><label class="form-label small">Гео / Агентство</label>
-          <select class="form-select form-select-sm" id="patternEntityId"></select></div>
-        <div class="mb-2"><label class="form-label small">Приоритет (выше = раньше)</label>
-          <input type="number" class="form-control form-control-sm" id="patternPriority" value="0" /></div>
-      </div>
-      <div class="modal-footer py-2">
-        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-        <button class="btn btn-sm btn-primary" onclick="App.Patterns.save()">Сохранить</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- EXPENSE CATEGORY MODAL -->
 <div class="modal fade" id="expCatModal" tabindex="-1">

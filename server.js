@@ -361,32 +361,17 @@ function parseAdsetName(name, geos, agents) {
   let geoMatch = null;
   let agentMatch = null;
 
-  // 1. Try DB-configured patterns first (ordered by priority DESC)
-  const patterns = db.prepare('SELECT * FROM adset_patterns ORDER BY priority DESC, id ASC').all();
-  for (const p of patterns) {
-    try {
-      const re = new RegExp(p.pattern, 'i');
-      if (re.test(name)) {
-        if (p.entity_type === 'geo' && !geoMatch) {
-          geoMatch = geos.find(g => g.id === p.entity_id) || null;
-        } else if (p.entity_type === 'agent' && !agentMatch) {
-          agentMatch = agents.find(a => a.id === p.entity_id) || null;
-        }
-      }
-    } catch {}
-  }
-
-  // 2. Fallback: match geo by abbreviation prefix, agent by abbreviation after geo prefix
-  if (!geoMatch) {
-    const sortedGeos = [...geos].sort((a, b) => b.abbreviation.length - a.abbreviation.length);
-    for (const geo of sortedGeos) {
-      if (name.toUpperCase().startsWith(geo.abbreviation.toUpperCase())) {
-        geoMatch = geo;
-        break;
-      }
+  // Match geo by abbreviation prefix (strict, longest first)
+  const sortedGeos = [...geos].sort((a, b) => b.abbreviation.length - a.abbreviation.length);
+  for (const geo of sortedGeos) {
+    if (name.toUpperCase().startsWith(geo.abbreviation.toUpperCase())) {
+      geoMatch = geo;
+      break;
     }
   }
-  if (!agentMatch && geoMatch) {
+
+  // Match agent by abbreviation after geo prefix (strict, longest first)
+  if (geoMatch) {
     const remaining = name.slice(geoMatch.abbreviation.length);
     const sortedAgents = [...agents].sort((a, b) => b.abbreviation.length - a.abbreviation.length);
     for (const agent of sortedAgents) {
@@ -397,31 +382,7 @@ function parseAdsetName(name, geos, agents) {
     }
   }
 
-  // 3. Creative patterns from DB
-  let creativeName = null;
-  for (const p of patterns) {
-    if (p.entity_type !== 'creative') continue;
-    try {
-      const re = new RegExp(p.pattern, 'i');
-      const m = name.match(re);
-      if (m) {
-        const cr = db.prepare('SELECT * FROM creatives WHERE id = ?').get(p.entity_id);
-        if (cr) creativeName = cr.name;
-        break;
-      }
-    } catch {}
-  }
-
-  // 4. Fallback: extract creative suffix from adset name
-  if (!creativeName && geoMatch && agentMatch) {
-    const afterGeoAgent = name.slice(geoMatch.abbreviation.length + agentMatch.abbreviation.length);
-    const idMatch = afterGeoAgent.match(/^(\d+(?:B\d+)?(?:L\d+)?)(.*)/i);
-    if (idMatch && idMatch[2] && idMatch[2].length >= 2) {
-      creativeName = idMatch[2];
-    }
-  }
-
-  return { geoMatch, agentMatch, creativeName };
+  return { geoMatch, agentMatch };
 }
 
 function resolveAdset(name) {
@@ -429,24 +390,12 @@ function resolveAdset(name) {
   if (row) return row;
   const geos = db.prepare('SELECT * FROM geos').all();
   const agents = db.prepare('SELECT * FROM agents').all();
-  const { geoMatch, agentMatch, creativeName } = parseAdsetName(name, geos, agents);
+  const { geoMatch, agentMatch } = parseAdsetName(name, geos, agents);
   const geo_id = geoMatch ? geoMatch.id : null;
   const agent_id = agentMatch ? agentMatch.id : null;
 
-  let creative_id = null;
-  if (creativeName) {
-    let creative = db.prepare('SELECT * FROM creatives WHERE name = ?').get(creativeName);
-    if (!creative) {
-      try {
-        db.prepare('INSERT INTO creatives (name, geo_id) VALUES (?, ?)').run(creativeName, geo_id);
-        creative = db.prepare('SELECT * FROM creatives WHERE name = ?').get(creativeName);
-      } catch {}
-    }
-    if (creative) creative_id = creative.id;
-  }
-
   const is_undefined = (geo_id && agent_id) ? 0 : 1;
-  db.prepare('INSERT OR IGNORE INTO adsets (name, creative_id, geo_id, agent_id, is_undefined) VALUES (?, ?, ?, ?, ?)').run(name, creative_id, geo_id, agent_id, is_undefined);
+  db.prepare('INSERT OR IGNORE INTO adsets (name, creative_id, geo_id, agent_id, is_undefined) VALUES (?, ?, ?, ?, ?)').run(name, null, geo_id, agent_id, is_undefined);
   return db.prepare('SELECT * FROM adsets WHERE name = ?').get(name);
 }
 
@@ -706,8 +655,10 @@ app.get('/api/statistics/creatives', adminBuyer, (req, res) => { try {
       (SELECT COALESCE(SUM(ch.deposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS deposits_count,
       (SELECT COALESCE(SUM(ch.redeposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS redeposits_count,
       (SELECT COALESCE(SUM(md.amount),0) FROM manual_deposits md JOIN adsets a ON a.id=md.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_d}) AS deposit_amount
-    FROM creatives c LEFT JOIN geos g ON g.id=c.geo_id ORDER BY c.name
-  `).all(...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams());
+    FROM creatives c LEFT JOIN geos g ON g.id=c.geo_id
+    ${geo_id ? 'WHERE c.geo_id = ?' : ''}
+    ORDER BY c.name
+  `).all(...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...(geo_id ? [parseInt(geo_id)] : []));
 
   res.json(rows.map(r => enrichStats(r)));
 } catch(e) { res.status(500).json({ detail: e.message }); } });
@@ -901,7 +852,13 @@ app.put('/api/deposits/:id/confirm', adminOperator, (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/deposits/:id', adminOperator, (req, res) => {
+app.delete('/api/deposits/:id', requireAuth('admin', 'operator', 'buyer'), (req, res) => {
+  if (req.user.role === 'buyer') {
+    const dep = db.prepare('SELECT * FROM manual_deposits WHERE id = ?').get(req.params.id);
+    if (!dep) return err(res, 404, 'Депозит не найден');
+    if (dep.status !== 'pending' || dep.created_by !== req.user.id)
+      return err(res, 403, 'Можно удалять только свои pending-записи');
+  }
   db.prepare('DELETE FROM manual_deposits WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -1173,19 +1130,37 @@ app.post('/api/import/fbtool-spend', adminBuyer, async (req, res) => {
       if (json.error) continue;
 
       const data = json.data || [];
+      const delExisting = db.prepare('DELETE FROM spend_records WHERE adset_id = ? AND date = ? AND cabinet_id IS NULL');
       db.transaction(() => {
         for (const block of data) {
           const adsets = block.adsets?.data || [];
           for (const item of adsets) {
             const name = item.name || '';
             if (!name) continue;
-            const spend = item.insights?.data?.[0]?.spend ?? item.insights?.spend ?? 0;
-            const amount = parseFloat(spend) || 0;
-            if (amount <= 0) continue;
-            const adset = resolveAdset(name);
-            if (adset.is_undefined) undefined_adsets.add(name);
-            insert.run(adset.id, name, date_from, amount, null);
-            imported++;
+            const insightsData = item.insights?.data;
+            if (Array.isArray(insightsData) && insightsData.length > 0) {
+              // Daily breakdown from byDay=1
+              const adset = resolveAdset(name);
+              if (adset.is_undefined) undefined_adsets.add(name);
+              for (const insight of insightsData) {
+                const amount = parseFloat(insight.spend) || 0;
+                if (amount <= 0) continue;
+                const date = insight.date_start || date_from;
+                delExisting.run(adset.id, date);
+                insert.run(adset.id, name, date, amount, null);
+                imported++;
+              }
+            } else {
+              // Fallback: single total
+              const spend = item.insights?.spend ?? 0;
+              const amount = parseFloat(spend) || 0;
+              if (amount <= 0) continue;
+              const adset = resolveAdset(name);
+              if (adset.is_undefined) undefined_adsets.add(name);
+              delExisting.run(adset.id, date_from);
+              insert.run(adset.id, name, date_from, amount, null);
+              imported++;
+            }
           }
         }
       })();
@@ -1440,31 +1415,23 @@ app.delete('/api/expense-items/:id', adminOnly, (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── ADSET PATTERNS ───────────────────────────────────────────────────────────
+// ─── ADSET RE-PARSE ──────────────────────────────────────────────────────────
 
-// Re-parse all adsets with current patterns
-app.post('/api/adset-patterns/re-parse', adminBuyer, (req, res) => {
+// Re-parse all adsets using geo/agent abbreviations
+app.post('/api/adsets/re-parse', adminBuyer, (req, res) => {
   const geos = db.prepare('SELECT * FROM geos').all();
   const agents = db.prepare('SELECT * FROM agents').all();
   const adsets = db.prepare('SELECT * FROM adsets').all();
   let updated = 0;
-  const update = db.prepare('UPDATE adsets SET geo_id = ?, agent_id = ?, creative_id = ?, is_undefined = ? WHERE id = ?');
+  const update = db.prepare('UPDATE adsets SET geo_id = ?, agent_id = ?, is_undefined = ? WHERE id = ?');
   db.transaction(() => {
     for (const a of adsets) {
-      const { geoMatch, agentMatch, creativeName } = parseAdsetName(a.name, geos, agents);
+      const { geoMatch, agentMatch } = parseAdsetName(a.name, geos, agents);
       const geo_id = geoMatch ? geoMatch.id : null;
       const agent_id = agentMatch ? agentMatch.id : null;
-      let creative_id = null;
-      if (creativeName) {
-        let cr = db.prepare('SELECT * FROM creatives WHERE name = ?').get(creativeName);
-        if (!cr) {
-          try { db.prepare('INSERT INTO creatives (name, geo_id) VALUES (?, ?)').run(creativeName, geo_id); cr = db.prepare('SELECT * FROM creatives WHERE name = ?').get(creativeName); } catch {}
-        }
-        if (cr) creative_id = cr.id;
-      }
       const is_undefined = (geo_id && agent_id) ? 0 : 1;
-      if (a.geo_id !== geo_id || a.agent_id !== agent_id || a.creative_id !== creative_id) {
-        update.run(geo_id, agent_id, creative_id, is_undefined, a.id);
+      if (a.geo_id !== geo_id || a.agent_id !== agent_id) {
+        update.run(geo_id, agent_id, is_undefined, a.id);
         updated++;
       }
     }
@@ -1472,8 +1439,8 @@ app.post('/api/adset-patterns/re-parse', adminBuyer, (req, res) => {
   res.json({ ok: true, updated, total: adsets.length });
 });
 
-// Pattern test must be before :id routes to avoid "test" being treated as an id
-app.get('/api/adset-patterns/test', anyAuth, (req, res) => {
+// Test adset name parsing
+app.get('/api/adsets/test-parse', anyAuth, (req, res) => {
   const { name } = req.query;
   if (!name) return err(res, 400, 'Укажите имя адсета');
   const geos = db.prepare('SELECT * FROM geos').all();
@@ -1483,38 +1450,6 @@ app.get('/api/adset-patterns/test', anyAuth, (req, res) => {
     geo: geoMatch ? { id: geoMatch.id, name: geoMatch.name, abbreviation: geoMatch.abbreviation } : null,
     agent: agentMatch ? { id: agentMatch.id, name: agentMatch.name, abbreviation: agentMatch.abbreviation } : null,
   });
-});
-
-app.get('/api/adset-patterns', anyAuth, (req, res) => {
-  const rows = db.prepare(`
-    SELECT p.*,
-      CASE WHEN p.entity_type='geo' THEN g.name ELSE ag.name END AS entity_name
-    FROM adset_patterns p
-    LEFT JOIN geos g ON p.entity_type='geo' AND g.id=p.entity_id
-    LEFT JOIN agents ag ON p.entity_type='agent' AND ag.id=p.entity_id
-    ORDER BY p.entity_type, p.priority DESC, p.id
-  `).all();
-  res.json(rows);
-});
-
-app.post('/api/adset-patterns', adminBuyer, (req, res) => {
-  const { entity_type, pattern, entity_id, priority } = req.body;
-  if (!entity_type || !pattern || !entity_id) return err(res, 400, 'Укажите тип, паттерн и сущность');
-  try { new RegExp(pattern, 'i'); } catch { return err(res, 400, 'Неверный regex паттерн'); }
-  const r = db.prepare('INSERT INTO adset_patterns (entity_type, pattern, entity_id, priority) VALUES (?, ?, ?, ?)').run(entity_type, pattern, entity_id, priority || 0);
-  res.json({ id: r.lastInsertRowid, entity_type, pattern, entity_id: +entity_id, priority: priority || 0 });
-});
-
-app.put('/api/adset-patterns/:id', adminBuyer, (req, res) => {
-  const { entity_type, pattern, entity_id, priority } = req.body;
-  try { new RegExp(pattern, 'i'); } catch { return err(res, 400, 'Неверный regex паттерн'); }
-  db.prepare('UPDATE adset_patterns SET entity_type=?, pattern=?, entity_id=?, priority=? WHERE id=?').run(entity_type, pattern, entity_id, priority || 0, req.params.id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/adset-patterns/:id', adminBuyer, (req, res) => {
-  db.prepare('DELETE FROM adset_patterns WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
 });
 
 // ─── OFFERS ─────────────────────────────────────────────────────────────────
