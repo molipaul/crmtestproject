@@ -836,3 +836,11 @@ a:hover { color: var(--accent-hover); }
   font-size: 0.82rem;
   color: var(--text-muted);
 }
+
+/* ─── BULK ASSIGN BAR STICKY ─── */
+#bulkAssignBar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background-color: #fff;
+}

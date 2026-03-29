@@ -666,7 +666,7 @@ app.get('/api/adsets', anyAuth, (req, res) => {
   if (geo_id) { q += ' AND a.geo_id = ?'; params.push(parseInt(geo_id)); }
   if (creative_id) { q += ' AND a.creative_id = ?'; params.push(parseInt(creative_id)); }
   if (undefined_only === 'true') { q += ' AND (a.is_undefined = 1 OR a.creative_id IS NULL)'; }
-  q += ' ORDER BY a.name';
+  q += undefined_only === 'true' ? ' ORDER BY g.name, a.name' : ' ORDER BY a.name';
   res.json(db.prepare(q).all(...params));
 });
 
@@ -706,10 +706,17 @@ app.put('/api/adsets/bulk', adminBuyer, (req, res) => {
   const stmt = db.prepare('SELECT id, geo_id, agent_id, creative_id FROM adsets WHERE id = ?');
   const upd = db.prepare('UPDATE adsets SET geo_id = ?, agent_id = ?, creative_id = ?, is_undefined = ? WHERE id = ?');
   let ok = 0;
+  let skipped = 0;
+  let creativeGeoId = null;
+  if (creative_id) {
+    const cr = db.prepare('SELECT geo_id FROM creatives WHERE id = ?').get(creative_id);
+    creativeGeoId = cr?.geo_id;
+  }
   db.transaction(() => {
     for (const id of ids) {
       const row = stmt.get(id);
       if (!row) continue;
+      if (creativeGeoId && row.geo_id && row.geo_id !== creativeGeoId) { skipped++; continue; }
       const g = geo_id !== undefined ? (geo_id || null) : row.geo_id;
       const a = agent_id !== undefined ? (agent_id || null) : row.agent_id;
       const c = creative_id !== undefined ? (creative_id || null) : row.creative_id;
@@ -719,7 +726,7 @@ app.put('/api/adsets/bulk', adminBuyer, (req, res) => {
     }
   })();
   logActivity(req.user.id, req.user.username, 'adsets_bulk_assign', `${ok} adsets`);
-  res.json({ ok, total: ids.length });
+  res.json({ ok, total: ids.length, skipped });
 });
 
 app.put('/api/adsets/:id', adminBuyer, (req, res) => {

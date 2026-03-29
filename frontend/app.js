@@ -12,11 +12,43 @@ function closeMobileSidebar() {
   document.getElementById('mobileOverlay')?.classList.remove('show');
 }
 
+// ─── TIPPY TOOLTIPS ──────────────────────────────────────────────────────────
+function initTooltips() {
+  if (typeof tippy === 'undefined') return;
+  // Destroy existing tippy instances on [title] elements to avoid duplicates
+  document.querySelectorAll('[title]').forEach(el => {
+    if (el._tippy) el._tippy.destroy();
+  });
+  tippy('[title]', {
+    animation: 'shift-away',
+    duration: [200, 150],
+    delay: [400, 0],
+    arrow: true,
+    onShow(instance) {
+      if (instance.reference.getAttribute('title')) {
+        instance.setContent(instance.reference.getAttribute('title'));
+        instance.reference.removeAttribute('title');
+      }
+    }
+  });
+}
+
 // ─── SIDEBAR COMPACT ──────────────────────────────────────────────────────────
 function toggleSidebarCompact() {
   const sidebar = document.querySelector('.sidebar');
   sidebar.classList.toggle('compact');
   localStorage.setItem('sidebar_compact', sidebar.classList.contains('compact') ? '1' : '0');
+  // Tippy tooltips for compact sidebar nav buttons
+  if (typeof tippy !== 'undefined' && sidebar.classList.contains('compact')) {
+    document.querySelectorAll('.sidebar.compact .nav-btn').forEach(btn => {
+      const text = btn.querySelector('span')?.textContent;
+      if (text && !btn._tippy) {
+        tippy(btn, { content: text, placement: 'right', animation: 'shift-away', delay: [200, 0] });
+      }
+    });
+  } else {
+    document.querySelectorAll('.nav-btn').forEach(btn => { if (btn._tippy) btn._tippy.destroy(); });
+  }
 }
 function restoreSidebarCompact() {
   if (localStorage.getItem('sidebar_compact') === '1') {
@@ -254,6 +286,7 @@ App.Auth = {
     restoreSidebarCompact();
     showApp();
     initApp(user);
+    initTooltips();
   },
 };
 
@@ -452,10 +485,10 @@ function switchDict(name) {
   document.querySelectorAll('.undef-check').forEach(cb => cb.checked = false);
   const checkAll = document.getElementById('undefinedCheckAll');
   if (checkAll) checkAll.checked = false;
-  if (name === 'geos') App.Geos.load();
-  if (name === 'agents') App.Agents.load();
-  if (name === 'creatives') App.Creatives.load();
-  if (name === 'undefined') App.Undefined.load();
+  if (name === 'geos') { App.Geos.load(); initTooltips(); }
+  if (name === 'agents') { App.Agents.load(); initTooltips(); }
+  if (name === 'creatives') { App.Creatives.load(); initTooltips(); }
+  if (name === 'undefined') { App.Undefined.load(); initTooltips(); }
 }
 document.querySelectorAll('#dictTab .nav-link').forEach(btn => {
   btn.addEventListener('click', () => switchDict(btn.dataset.dict));
@@ -525,6 +558,8 @@ async function initApp(user) {
     initRangePicker('plDateRange', () => App.Dashboard.loadPL());
     initRangePicker('cmpRangeA');
     initRangePicker('cmpRangeB');
+    initRangePicker('fbtoolDateRange');
+    initRangePicker('fbDateRange');
   }
 
   // Stats advanced filter listeners
@@ -655,11 +690,15 @@ App.Agents = {
     document.getElementById('agentAbbr').value = a?.abbreviation || '';
     document.getElementById('agentComm').value = a?.current_commission ?? '';
     document.getElementById('agentModalTitle').textContent = a ? 'Редактировать агента' : 'Добавить агента';
+    // Hide commission field when editing (use "%" button instead)
+    const commField = document.getElementById('agentComm')?.closest('.mb-2');
+    if (commField) commField.style.display = a ? 'none' : '';
     new bootstrap.Modal('#agentModal').show();
   },
   async save() {
     const id = document.getElementById('agentId').value;
-    const body = { name: document.getElementById('agentName').value.trim(), abbreviation: document.getElementById('agentAbbr').value.trim(), commission_pct: parseFloat(document.getElementById('agentComm').value)||0 };
+    const body = { name: document.getElementById('agentName').value.trim(), abbreviation: document.getElementById('agentAbbr').value.trim() };
+    if (!id) body.commission_pct = parseFloat(document.getElementById('agentComm').value)||0;
     if (!body.name||!body.abbreviation) return toast('Заполните все поля','warning');
     try {
       if (id) await apiFetch(`/api/agents/${id}`,{method:'PUT',body:JSON.stringify(body)});
@@ -861,8 +900,8 @@ App.Undefined = {
       return `<tr>
       <td><input type="checkbox" class="form-check-input undef-check" value="${a.id}" onchange="App.Undefined.onCheck()"></td>
       <td class="undefined-adset font-monospace">${a.name}</td>
-      <td>${a.geo_name||'<span class="text-danger">не определено</span>'}</td>
-      <td>${a.agent_name||'<span class="text-danger">не определено</span>'}</td>
+      <td>${a.geo_name||'<span class="text-muted">—</span>'}</td>
+      <td>${a.agent_name||'<span class="text-muted">—</span>'}</td>
       <td><select class="form-select form-select-sm" style="width:140px" onchange="App.Undefined.assignCreative(${a.id}, this.value)">
         <option value="">—</option>${creativeOptions}
       </select></td>
@@ -935,6 +974,7 @@ App.Undefined = {
       body[field] = parseInt(val);
       const res = await apiFetch('/api/adsets/bulk', { method: 'PUT', body: JSON.stringify(body) });
       toast(`Обновлено: ${res.ok} из ${res.total}`);
+      if (res.skipped) toast(`Пропущено ${res.skipped} адсетов: гео не совпадает с креативом`, 'warning');
       await this.load();
       await checkUndefined();
       document.getElementById('bulkAssignBar')?.classList.add('d-none');
@@ -1946,8 +1986,7 @@ App.Import = {
   async importFromFBTool() {
     const api_key = document.getElementById('fbtoolApiKey').value.trim();
     const accountsStr = document.getElementById('fbtoolAccounts').value.trim();
-    const date_from = document.getElementById('fbtoolDateFrom').value;
-    const date_to = document.getElementById('fbtoolDateTo').value;
+    const { from: date_from, to: date_to } = getRangeValues('fbtoolDateRange');
     if (!api_key || !accountsStr) return toast('Укажите API key и аккаунты','warning');
     if (!date_from || !date_to) return toast('Укажите период','warning');
     const account_ids = accountsStr.split(',').map(s => s.trim()).filter(Boolean);
@@ -1972,8 +2011,7 @@ App.Import = {
 
   async importFromFB() {
     const cabinet_id = parseInt(document.getElementById('fbCabinet').value);
-    const date_from = document.getElementById('fbDateFrom').value;
-    const date_to = document.getElementById('fbDateTo').value;
+    const { from: date_from, to: date_to } = getRangeValues('fbDateRange');
     if (!cabinet_id) return toast('Выберите кабинет','warning');
     if (!date_from || !date_to) return toast('Укажите период','warning');
     const btn = document.getElementById('fbImportBtn');

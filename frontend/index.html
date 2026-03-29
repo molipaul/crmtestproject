@@ -9,6 +9,7 @@
   <link href="style.css" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/airbnb.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/animations/shift-away.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
@@ -521,11 +522,9 @@
                 <label class="form-label small">ID аккаунтов (через запятую)</label>
                 <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolAccounts" placeholder="18850199, 18865827, ..." />
               </div>
-              <div class="mb-2 d-flex gap-2">
-                <div class="flex-fill"><label class="form-label small">С</label>
-                  <input type="date" class="form-control form-control-sm" id="fbtoolDateFrom" /></div>
-                <div class="flex-fill"><label class="form-label small">По</label>
-                  <input type="date" class="form-control form-control-sm" id="fbtoolDateTo" /></div>
+              <div class="mb-2">
+                <label class="form-label small">Период</label>
+                <input type="text" class="form-control form-control-sm date-range-picker" id="fbtoolDateRange" placeholder="Выберите период" readonly>
               </div>
               <button class="btn btn-outline-warning btn-sm w-100" id="fbtoolImportBtn" onclick="App.Import.importFromFBTool()">
                 <i class="bi bi-cloud-download me-1"></i>Загрузить из FBTool.pro
@@ -560,11 +559,9 @@
                 <label class="form-label small">Кабинет</label>
                 <select class="form-select form-select-sm" id="fbCabinet"></select>
               </div>
-              <div class="mb-2 d-flex gap-2">
-                <div class="flex-fill"><label class="form-label small">С</label>
-                  <input type="date" class="form-control form-control-sm" id="fbDateFrom" /></div>
-                <div class="flex-fill"><label class="form-label small">По</label>
-                  <input type="date" class="form-control form-control-sm" id="fbDateTo" /></div>
+              <div class="mb-2">
+                <label class="form-label small">Период</label>
+                <input type="text" class="form-control form-control-sm date-range-picker" id="fbDateRange" placeholder="Выберите период" readonly>
               </div>
               <button class="btn btn-outline-primary btn-sm w-100" id="fbImportBtn" onclick="App.Import.importFromFB()">
                 <i class="bi bi-cloud-download me-1"></i>Загрузить из FB API
@@ -1181,6 +1178,7 @@
 <!-- ROI Calculator FAB -->
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/tippy.js@6"></script>
 <script src="app.js"></script>
 </body>
 </html>
