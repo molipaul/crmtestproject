@@ -720,7 +720,8 @@ App.Agents = {
     try {
       await apiFetch(`/api/agents/${agent_id}/commissions`,{method:'POST',body:JSON.stringify(body)});
       bootstrap.Modal.getInstance('#commModal')?.hide();
-      toast('Комиссия обновлена'); await this.load();
+      toast('Комиссия обновлена');
+      await this.load();
     } catch(e) { toast(e.message,'danger'); }
   },
   async del(id) {
@@ -897,14 +898,17 @@ App.Undefined = {
     tb.innerHTML = this.data.map(a => {
       const geoCreatives = (this._creatives || []).filter(c => c.geo_id == a.geo_id);
       const creativeOptions = geoCreatives.map(c => `<option value="${c.id}" ${c.id==a.creative_id?'selected':''}>${c.name}</option>`).join('');
-      return `<tr>
+      const canAssignCreative = a.geo_id && a.agent_id;
+      return `<tr data-adset-id="${a.id}">
       <td><input type="checkbox" class="form-check-input undef-check" value="${a.id}" onchange="App.Undefined.onCheck()"></td>
       <td class="undefined-adset font-monospace">${a.name}</td>
       <td>${a.geo_name||'<span class="text-muted">—</span>'}</td>
       <td>${a.agent_name||'<span class="text-muted">—</span>'}</td>
-      <td><select class="form-select form-select-sm" style="width:140px" onchange="App.Undefined.assignCreative(${a.id}, this.value)">
+      <td>${canAssignCreative
+        ? `<select class="form-select form-select-sm" style="width:140px" onchange="App.Undefined.assignCreative(${a.id}, this.value)">
         <option value="">—</option>${creativeOptions}
-      </select></td>
+      </select>`
+        : '<span class="text-muted small" title="Сначала назначьте гео и агента">—</span>'}</td>
       <td class="text-end">
         ${btnIcon('pencil','Привязать',`App.Undefined.edit(${a.id})`)}
         ${btnIcon('trash','Удалить',`App.Undefined.del(${a.id})`,true)}
@@ -915,6 +919,8 @@ App.Undefined = {
     try {
       await apiFetch(`/api/adsets/${adsetId}`, { method: 'PUT', body: JSON.stringify({ creative_id: creativeId || null }) });
       toast('Креатив назначен');
+      const row = document.querySelector(`tr[data-adset-id="${adsetId}"]`);
+      if (row) { row.classList.add('flash-success'); setTimeout(() => row.classList.remove('flash-success'), 1500); }
     } catch(e) { toast(e.message, 'danger'); }
   },
   edit(id) {
@@ -973,8 +979,9 @@ App.Undefined = {
       const body = { ids };
       body[field] = parseInt(val);
       const res = await apiFetch('/api/adsets/bulk', { method: 'PUT', body: JSON.stringify(body) });
-      toast(`Обновлено: ${res.ok} из ${res.total}`);
-      if (res.skipped) toast(`Пропущено ${res.skipped} адсетов: гео не совпадает с креативом`, 'warning');
+      let msg = `Обновлено: ${res.ok}`;
+      if (res.skipped) msg += `, пропущено: ${res.skipped} (нет гео/агента или гео не совпадает)`;
+      toast(msg, res.skipped ? 'warning' : 'success');
       await this.load();
       await checkUndefined();
       document.getElementById('bulkAssignBar')?.classList.add('d-none');

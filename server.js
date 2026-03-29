@@ -554,7 +554,7 @@ app.delete('/api/geos/:id', adminBuyer, (req, res) => {
 app.get('/api/agents', anyAuth, (req, res) => {
   const agents = db.prepare('SELECT * FROM agents ORDER BY name').all();
   const result = agents.map(a => {
-    const comms = db.prepare('SELECT * FROM agent_commissions WHERE agent_id = ? ORDER BY effective_from DESC').all(a.id);
+    const comms = db.prepare('SELECT * FROM agent_commissions WHERE agent_id = ? ORDER BY effective_from DESC, id DESC').all(a.id);
     return { ...a, commissions: comms, current_commission: comms[0]?.commission_pct ?? 0 };
   });
   res.json(result);
@@ -716,6 +716,9 @@ app.put('/api/adsets/bulk', adminBuyer, (req, res) => {
     for (const id of ids) {
       const row = stmt.get(id);
       if (!row) continue;
+      // Skip adsets without geo or agent - they can't have creatives assigned
+      if (creative_id && (!row.geo_id || !row.agent_id)) { skipped++; continue; }
+      // Skip if geo mismatch with creative
       if (creativeGeoId && row.geo_id && row.geo_id !== creativeGeoId) { skipped++; continue; }
       const g = geo_id !== undefined ? (geo_id || null) : row.geo_id;
       const a = agent_id !== undefined ? (agent_id || null) : row.agent_id;

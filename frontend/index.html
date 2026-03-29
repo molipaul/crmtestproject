@@ -818,8 +818,7 @@
 
   <!-- ══════════════ ACTIVITY LOG ══════════════ -->
   <div id="section-activitylog" class="section-panel d-none">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h6 class="mb-0 text-muted"><i class="bi bi-clock-history me-1"></i>Журнал действий</h6>
+    <div class="d-flex justify-content-end mb-3">
       <button class="btn btn-sm btn-outline-secondary" onclick="App.ActivityLog.load()"><i class="bi bi-arrow-clockwise me-1"></i>Обновить</button>
     </div>
     <div id="activityLogContent">
@@ -829,7 +828,7 @@
 
   <div id="section-deleted" class="section-panel d-none">
     <div class="d-flex justify-content-between align-items-center mb-3">
-      <h6 class="mb-0 text-muted"><i class="bi bi-trash3 me-1"></i>Корзина <span class="text-muted small">(хранится 30 дней)</span></h6>
+      <span class="text-muted small">(хранится 30 дней)</span>
       <button class="btn btn-sm btn-outline-secondary" onclick="App.Deleted.load()"><i class="bi bi-arrow-clockwise me-1"></i>Обновить</button>
     </div>
     <div class="table-responsive">
