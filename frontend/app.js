@@ -1526,6 +1526,8 @@ App.Deposits = {
   _qdType: 'dep',
   _qdRowId: null,
   _adsetMap: {},
+  _histOffset: 0,
+  _histRows: [],
 
   initSection() {
     const user = getUser();
@@ -1688,27 +1690,33 @@ App.Deposits = {
     } catch(e) { toast(e.message,'danger'); }
   },
 
-  async loadHistory() {
+  async loadHistory(append) {
+    if (!append) { this._histOffset = 0; this._histRows = []; }
     const user = getUser();
     const isOperator = user?.role === 'operator';
     const geoSel = isOperator ? 'opHistGeo' : 'depHistGeo';
     const monthSel = isOperator ? 'opHistMonth' : 'depHistMonth';
     const tbodyId = isOperator ? 'opHistTbody' : 'depHistTbody';
-    document.getElementById(tbodyId).innerHTML = '<tr><td colspan="8"><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line w-75"></div></td></tr>';
+    if (!append) document.getElementById(tbodyId).innerHTML = '<tr><td colspan="8"><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line w-75"></div></td></tr>';
 
     const geoId = document.getElementById(geoSel)?.value;
     const month = document.getElementById(monthSel)?.value;
-    let url = '/api/deposits';
-    const p = [];
+    const p = ['limit=100', 'offset=' + this._histOffset];
     if (geoId) p.push(`geo_id=${geoId}`);
     if (month) p.push(`month=${month}`);
-    if (p.length) url += '?' + p.join('&');
+    const url = '/api/deposits?' + p.join('&');
 
-    const rows = await apiFetch(url);
+    const res = await apiFetch(url);
+    const newRows = res.data || [];
+    this._histRows = append ? this._histRows.concat(newRows) : newRows;
+    this._histOffset += newRows.length;
+    const allRows = this._histRows;
     const tb = document.getElementById(tbodyId);
     const isPending = r => r.status === 'pending' || !r.amount;
+    const remaining = res.total - this._histOffset;
+    const loadMoreBtn = remaining > 0 ? `<tr><td colspan="${isOperator ? 7 : 9}" class="text-center py-2"><button class="btn btn-sm btn-outline-primary" onclick="App.Deposits.loadHistory(true)">Загрузить ещё (${remaining} записей)</button></td></tr>` : '';
     if (isOperator) {
-      tb.innerHTML = rows.map(r => `<tr>
+      let html = allRows.map(r => `<tr>
         <td>${r.date}</td>
         <td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
         <td>${r.geo_name||'—'}</td>
@@ -1716,11 +1724,12 @@ App.Deposits = {
         <td class="text-end stat-number fw-semibold">${isPending(r) ? '<span class="text-muted">—</span>' : '$'+fmt(r.amount)}</td>
         <td>${isPending(r) ? '<span class="badge bg-warning text-dark">Pending</span>' : '<span class="badge bg-success">Подтверждён</span>'}</td>
         <td>${btnIcon('trash','Удалить',`App.Deposits.del(${r.id})`,true)}</td>
-      </tr>`).join('') || '<tr><td colspan="7" class="text-center text-muted py-3">Нет депозитов</td></tr>';
+      </tr>`).join('');
+      tb.innerHTML = (html || '<tr><td colspan="7" class="text-center text-muted py-3">Нет депозитов</td></tr>') + loadMoreBtn;
     } else {
       const me = getUser();
       const isBuyer = me?.role === 'buyer';
-      tb.innerHTML = rows.map(r => {
+      let html = allRows.map(r => {
         const canDel = !isBuyer || (isPending(r) && r.created_by === me?.id);
         return `<tr>
         <td>${r.date}</td>
@@ -1733,7 +1742,8 @@ App.Deposits = {
         <td>${r.agent_name||'—'}</td>
         <td>${canDel ? btnIcon('trash','Удалить',`App.Deposits.del(${r.id})`,true) : ''}</td>
       </tr>`;
-      }).join('') || '<tr><td colspan="9" class="text-center text-muted py-3">Нет депозитов</td></tr>';
+      }).join('');
+      tb.innerHTML = (html || '<tr><td colspan="9" class="text-center text-muted py-3">Нет депозитов</td></tr>') + loadMoreBtn;
     }
   },
   async del(id) {
@@ -1831,6 +1841,10 @@ App.Deposits = {
 
 App.Import = {
   _csvText: null,
+  _spendOffset: 0,
+  _spendRows: [],
+  _chatterfyOffset: 0,
+  _chatterfyRows: [],
 
   async init() {
     document.getElementById('spendDate').value = todayStr();
@@ -1884,16 +1898,27 @@ App.Import = {
       await this.loadSpendHistory(); checkUndefined();
     } catch(e) { toast(e.message,'danger'); }
   },
-  async loadSpendHistory() {
+  async loadSpendHistory(append) {
+    if (!append) { this._spendOffset = 0; this._spendRows = []; }
     const month = document.getElementById('spendHistMonth').value;
-    const rows = await apiFetch(month?`/api/import/spend?month=${month}`:'/api/import/spend');
+    let url = '/api/import/spend?limit=100&offset=' + this._spendOffset;
+    if (month) url += '&month=' + month;
+    const res = await apiFetch(url);
+    const rows = res.data || [];
+    this._spendRows = append ? this._spendRows.concat(rows) : rows;
+    this._spendOffset += rows.length;
     const tb = document.getElementById('spendHistTbody');
-    tb.innerHTML = rows.map(r=>`<tr>
+    let html = this._spendRows.map(r=>`<tr>
       <td>${r.date}</td><td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
       <td>${r.creative_name||'—'}</td><td>${r.geo_name||'—'}</td>
       <td class="text-end stat-number">$${fmt(r.amount)}</td>
-      <td>${btnIcon('trash','Удалить',`App.Import.delSpend(${r.id})`,true)}</td></tr>`).join('')||
-      '<tr><td colspan="6" class="text-center text-muted py-3">Нет записей</td></tr>';
+      <td>${btnIcon('trash','Удалить',`App.Import.delSpend(${r.id})`,true)}</td></tr>`).join('');
+    if (!html) html = '<tr><td colspan="6" class="text-center text-muted py-3">Нет записей</td></tr>';
+    const remaining = res.total - this._spendOffset;
+    if (remaining > 0) {
+      html += `<tr><td colspan="6" class="text-center py-2"><button class="btn btn-sm btn-outline-primary" onclick="App.Import.loadSpendHistory(true)">Загрузить ещё (${remaining} записей)</button></td></tr>`;
+    }
+    tb.innerHTML = html;
   },
   onCSVFile() {
     const file = document.getElementById('chatterfyFile').files[0];
@@ -1936,17 +1961,28 @@ App.Import = {
       await this.loadChatterfyHistory(); checkUndefined();
     } catch(e) { toast(e.message,'danger'); }
   },
-  async loadChatterfyHistory() {
+  async loadChatterfyHistory(append) {
+    if (!append) { this._chatterfyOffset = 0; this._chatterfyRows = []; }
     const month = document.getElementById('chatterfyHistMonth').value;
-    const rows = await apiFetch(month?`/api/import/chatterfy?month=${month}`:'/api/import/chatterfy');
+    let url = '/api/import/chatterfy?limit=100&offset=' + this._chatterfyOffset;
+    if (month) url += '&month=' + month;
+    const res = await apiFetch(url);
+    const rows = res.data || [];
+    this._chatterfyRows = append ? this._chatterfyRows.concat(rows) : rows;
+    this._chatterfyOffset += rows.length;
     const tb = document.getElementById('chatterfyHistTbody');
-    tb.innerHTML = rows.map(r=>`<tr>
+    let html = this._chatterfyRows.map(r=>`<tr>
       <td>${r.date}</td><td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
       <td class="text-end">${fmtInt(r.pdp)}</td><td class="text-end">${fmtInt(r.dialogs)}</td>
       <td class="text-end">${fmtInt(r.registrations)}</td><td class="text-end">${fmtInt(r.deposits)}</td>
       <td class="text-end">${fmtInt(r.redeposits)}</td>
-      <td>${btnIcon('trash','Удалить',`App.Import.delChatterfy(${r.id})`,true)}</td></tr>`).join('')||
-      '<tr><td colspan="8" class="text-center text-muted py-3">Нет записей</td></tr>';
+      <td>${btnIcon('trash','Удалить',`App.Import.delChatterfy(${r.id})`,true)}</td></tr>`).join('');
+    if (!html) html = '<tr><td colspan="8" class="text-center text-muted py-3">Нет записей</td></tr>';
+    const remaining = res.total - this._chatterfyOffset;
+    if (remaining > 0) {
+      html += `<tr><td colspan="8" class="text-center py-2"><button class="btn btn-sm btn-outline-primary" onclick="App.Import.loadChatterfyHistory(true)">Загрузить ещё (${remaining} записей)</button></td></tr>`;
+    }
+    tb.innerHTML = html;
   },
 
   async delChatterfy(id) {
@@ -2895,22 +2931,30 @@ App.PL = {
 // ─── ACTIVITY LOG ────────────────────────────────────────────────────────────
 
 App.ActivityLog = {
-  async load() {
+  _offset: 0,
+  _rows: [],
+  async load(append) {
+    if (!append) { this._offset = 0; this._rows = []; }
     try {
-      const data = await apiFetch('/api/activity-log');
+      const res = await apiFetch('/api/activity-log?limit=100&offset=' + this._offset);
+      const newRows = res.data || [];
+      this._rows = append ? this._rows.concat(newRows) : newRows;
+      this._offset += newRows.length;
       const el = document.getElementById('activityLogContent');
-      if (!data.length) {
+      if (!this._rows.length) {
         el.innerHTML = '<div class="text-center py-5"><i class="bi bi-clock-history" style="font-size:2.5rem;color:var(--text-muted);opacity:.3"></i><p class="text-muted mt-2">Нет записей в журнале</p></div>';
         return;
       }
+      const remaining = res.total - this._offset;
+      const loadMore = remaining > 0 ? `<tr><td colspan="4" class="text-center py-2"><button class="btn btn-sm btn-outline-primary" onclick="App.ActivityLog.load(true)">Загрузить ещё (${remaining} записей)</button></td></tr>` : '';
       el.innerHTML = `<div class="table-responsive"><table class="table table-sm crm-table"><thead><tr>
         <th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th>
-      </tr></thead><tbody>${data.map(r => `<tr>
+      </tr></thead><tbody>${this._rows.map(r => `<tr>
         <td class="text-muted small">${r.created_at}</td>
         <td class="fw-medium">${r.username}</td>
         <td><span class="badge bg-secondary" style="font-size:.65rem">${r.action}</span></td>
         <td class="small">${r.details || '—'}</td>
-      </tr>`).join('')}</tbody></table></div>`;
+      </tr>`).join('')}${loadMore}</tbody></table></div>`;
     } catch {
       document.getElementById('activityLogContent').innerHTML = '<div class="text-center py-5"><i class="bi bi-clock-history" style="font-size:2.5rem;color:var(--text-muted);opacity:.3"></i><p class="text-muted mt-2">Нет записей в журнале</p></div>';
     }
@@ -2936,15 +2980,22 @@ App.Deleted = {
       }
     } catch { return '—'; }
   },
-  async load() {
+  _delOffset: 0,
+  _delRows: [],
+  async load(append) {
+    if (!append) { this._delOffset = 0; this._delRows = []; }
     const tb = document.getElementById('deletedTbody');
     try {
-      const rows = await apiFetch('/api/deleted');
-      if (!rows.length) {
+      const res = await apiFetch('/api/deleted?limit=100&offset=' + this._delOffset);
+      const newRows = res.data || [];
+      this._delRows = append ? this._delRows.concat(newRows) : newRows;
+      this._delOffset += newRows.length;
+      if (!this._delRows.length) {
         tb.innerHTML = '<tr><td colspan="5">' + emptyState('trash3','Корзина пуста') + '</td></tr>';
         return;
       }
-      tb.innerHTML = rows.map(r => `<tr>
+      const remaining = res.total - this._delOffset;
+      let html = this._delRows.map(r => `<tr>
         <td class="text-muted small">${r.deleted_at}</td>
         <td><span class="badge bg-secondary" style="font-size:.65rem">${this._typeNames[r.table_name]||r.table_name}</span></td>
         <td class="small font-monospace" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._summary(r.table_name, r.record_data)}</td>
@@ -2954,6 +3005,10 @@ App.Deleted = {
           ${btnIcon('x-lg','Удалить навсегда',`App.Deleted.del(${r.id})`,true)}
         </td>
       </tr>`).join('');
+      if (remaining > 0) {
+        html += `<tr><td colspan="5" class="text-center py-2"><button class="btn btn-sm btn-outline-primary" onclick="App.Deleted.load(true)">Загрузить ещё (${remaining} записей)</button></td></tr>`;
+      }
+      tb.innerHTML = html;
     } catch(e) { tb.innerHTML = `<tr><td colspan="5" class="text-danger">${e.message}</td></tr>`; }
   },
   async restore(id) {
@@ -3044,6 +3099,10 @@ App.Realtime = {
       this._es.addEventListener('data_update', () => {
         checkUndefined();
         App.Notifications.check();
+      });
+      this._es.addEventListener('budget_alert', (e) => {
+        const data = JSON.parse(e.data);
+        toast(`\u26a0\ufe0f \u0411\u044e\u0434\u0436\u0435\u0442 ${data.entity}: ${data.pct}% \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u043e ($${data.limit} \u043b\u0438\u043c\u0438\u0442)`, 'warning');
       });
       this._es.onerror = () => {
         // Fallback to polling on SSE failure
@@ -3198,6 +3257,20 @@ App.Funnel = {
       </div>${i < steps.length - 1 ? '<div class="funnel-arrow text-center"><i class="bi bi-arrow-down"></i></div>' : ''}`
     ).join('');
   },
+};
+
+// ─── ADMIN ───────────────────────────────────────────────────────────────────
+
+App.Admin = {
+  async resetDB() {
+    if (!confirm('ВНИМАНИЕ! Все данные (спенды, импорты, депозиты, адсеты, креативы) будут удалены. Пользователи и настройки сохранятся.\n\nПродолжить?')) return;
+    if (!confirm('Вы уверены? Это действие необратимо!')) return;
+    try {
+      await apiFetch('/api/admin/reset-db', { method: 'POST' });
+      toast('База данных очищена', 'success');
+      location.reload();
+    } catch(e) { toast(e.message, 'danger'); }
+  }
 };
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────

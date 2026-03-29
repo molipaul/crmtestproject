@@ -718,7 +718,10 @@
   <div id="section-users" class="section-panel d-none">
     <div class="d-flex justify-content-between align-items-center mb-3">
       <h6 class="mb-0 text-muted">Пользователи системы</h6>
-      <button class="btn btn-sm btn-primary" onclick="App.Users.openAdd()"><i class="bi bi-person-plus me-1"></i>Добавить</button>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-danger role-admin" onclick="App.Admin.resetDB()"><i class="bi bi-trash3 me-1"></i>Сбросить данные</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Users.openAdd()"><i class="bi bi-person-plus me-1"></i>Добавить</button>
+      </div>
     </div>
     <div class="table-responsive" style="max-width:700px">
       <table class="table table-sm table-hover crm-table">

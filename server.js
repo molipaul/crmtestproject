@@ -238,8 +238,36 @@ db.exec(`CREATE TABLE IF NOT EXISTS deleted_records (
 // Auto-purge records older than 30 days
 db.prepare("DELETE FROM deleted_records WHERE deleted_at < datetime('now', '-30 days')").run();
 
+// ─── PERFORMANCE INDEXES ────────────────────────────────────────────────────
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_spend_adset_date ON spend_records(adset_id, date);
+  CREATE INDEX IF NOT EXISTS idx_chatterfy_adset_date ON chatterfy_records(adset_id, date);
+  CREATE INDEX IF NOT EXISTS idx_deposits_adset_date ON manual_deposits(adset_id, date);
+  CREATE INDEX IF NOT EXISTS idx_adsets_geo ON adsets(geo_id);
+  CREATE INDEX IF NOT EXISTS idx_adsets_agent ON adsets(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_adsets_creative ON adsets(creative_id);
+  CREATE INDEX IF NOT EXISTS idx_adsets_buyer ON adsets(buyer_id);
+  CREATE INDEX IF NOT EXISTS idx_commissions_agent ON agent_commissions(agent_id, effective_from DESC);
+  CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at);
+  CREATE INDEX IF NOT EXISTS idx_deleted_at ON deleted_records(deleted_at);
+`);
+
 function logActivity(userId, username, action, details) {
   try { db.prepare('INSERT INTO activity_log (user_id, username, action, details) VALUES (?, ?, ?, ?)').run(userId, username, action, details || null); } catch {}
+}
+
+// ─── QUERY CACHE ────────────────────────────────────────────────────────────
+const _cache = new Map();
+function cached(key, ttlMs, fn) {
+  const e = _cache.get(key);
+  if (e && Date.now() - e.ts < ttlMs) return e.data;
+  const data = fn();
+  _cache.set(key, { data, ts: Date.now() });
+  return data;
+}
+function invalidateCache(prefix) {
+  for (const k of _cache.keys()) if (k.startsWith(prefix)) _cache.delete(k);
 }
 
 // Change tracking (audit trail)
@@ -482,7 +510,7 @@ function err(res, status, msg) {
 // ─── GEO ─────────────────────────────────────────────────────────────────────
 
 app.get('/api/geos', anyAuth, (req, res) => {
-  res.json(db.prepare('SELECT * FROM geos ORDER BY name').all());
+  res.json(cached('geos', 300000, () => db.prepare('SELECT * FROM geos ORDER BY name').all()));
 });
 
 app.post('/api/geos', adminBuyer, (req, res) => {
@@ -490,6 +518,7 @@ app.post('/api/geos', adminBuyer, (req, res) => {
   if (!name || !abbreviation) return err(res, 400, 'Заполните все поля');
   try {
     db.prepare('INSERT INTO geos (name, abbreviation) VALUES (?, ?)').run(name, abbreviation.toUpperCase());
+    invalidateCache('geos');
     logActivity(req.user.id, req.user.username, 'geo_create', name);
     res.json(db.prepare('SELECT * FROM geos WHERE abbreviation = ?').get(abbreviation.toUpperCase()));
   } catch (e) {
@@ -502,6 +531,7 @@ app.put('/api/geos/:id', adminBuyer, (req, res) => {
   const { name, abbreviation } = req.body;
   const old = db.prepare('SELECT * FROM geos WHERE id = ?').get(req.params.id);
   db.prepare('UPDATE geos SET name = ?, abbreviation = ? WHERE id = ?').run(name, abbreviation.toUpperCase(), req.params.id);
+  invalidateCache('geos');
   if (old) trackChanges('geos', req.params.id, old, { name, abbreviation: abbreviation.toUpperCase() }, req.user.id, req.user.username);
   logActivity(req.user.id, req.user.username, 'geo_update', name);
   res.json({ ok: true });
@@ -545,6 +575,7 @@ app.delete('/api/geos/:id', adminBuyer, (req, res) => {
     db.prepare('DELETE FROM offers WHERE geo_id = ?').run(geoId);
     db.prepare('DELETE FROM geos WHERE id = ?').run(geoId);
   })();
+  invalidateCache('geos');
   logActivity(req.user.id, req.user.username, 'geo_delete_cascade', `geo #${geoId}, adsets: ${adsetIds.length}`);
   res.json({ ok: true, deleted_adsets: adsetIds.length });
 });
@@ -552,12 +583,13 @@ app.delete('/api/geos/:id', adminBuyer, (req, res) => {
 // ─── AGENTS ──────────────────────────────────────────────────────────────────
 
 app.get('/api/agents', anyAuth, (req, res) => {
-  const agents = db.prepare('SELECT * FROM agents ORDER BY name').all();
-  const result = agents.map(a => {
-    const comms = db.prepare('SELECT * FROM agent_commissions WHERE agent_id = ? ORDER BY effective_from DESC, id DESC').all(a.id);
-    return { ...a, commissions: comms, current_commission: comms[0]?.commission_pct ?? 0 };
-  });
-  res.json(result);
+  res.json(cached('agents', 300000, () => {
+    const agents = db.prepare('SELECT * FROM agents ORDER BY name').all();
+    return agents.map(a => {
+      const comms = db.prepare('SELECT * FROM agent_commissions WHERE agent_id = ? ORDER BY effective_from DESC, id DESC').all(a.id);
+      return { ...a, commissions: comms, current_commission: comms[0]?.commission_pct ?? 0 };
+    });
+  }));
 });
 
 app.post('/api/agents', adminBuyer, (req, res) => {
@@ -567,6 +599,7 @@ app.post('/api/agents', adminBuyer, (req, res) => {
     const info = db.prepare('INSERT INTO agents (name, abbreviation) VALUES (?, ?)').run(name, abbreviation);
     const today = new Date().toISOString().slice(0, 10);
     db.prepare('INSERT INTO agent_commissions (agent_id, commission_pct, effective_from) VALUES (?, ?, ?)').run(info.lastInsertRowid, commission_pct ?? 0, today);
+    invalidateCache('agents');
     logActivity(req.user.id, req.user.username, 'agent_create', name);
     res.json({ ok: true, id: info.lastInsertRowid });
   } catch (e) {
@@ -579,6 +612,7 @@ app.put('/api/agents/:id', adminBuyer, (req, res) => {
   const { name, abbreviation } = req.body;
   const old = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id);
   db.prepare('UPDATE agents SET name = ?, abbreviation = ? WHERE id = ?').run(name, abbreviation, req.params.id);
+  invalidateCache('agents');
   if (old) trackChanges('agents', req.params.id, old, { name, abbreviation }, req.user.id, req.user.username);
   logActivity(req.user.id, req.user.username, 'agent_update', name);
   res.json({ ok: true });
@@ -587,12 +621,14 @@ app.put('/api/agents/:id', adminBuyer, (req, res) => {
 app.post('/api/agents/:id/commissions', adminBuyer, (req, res) => {
   const { commission_pct, effective_from } = req.body;
   db.prepare('INSERT INTO agent_commissions (agent_id, commission_pct, effective_from) VALUES (?, ?, ?)').run(req.params.id, commission_pct, effective_from);
+  invalidateCache('agents');
   res.json({ ok: true });
 });
 
 app.delete('/api/agents/:id', adminBuyer, (req, res) => {
   softDelete('agents', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM agents WHERE id = ?').run(req.params.id);
+  invalidateCache('agents');
   logActivity(req.user.id, req.user.username, 'agent_delete', req.params.id);
   res.json({ ok: true });
 });
@@ -601,21 +637,23 @@ app.delete('/api/agents/:id', adminBuyer, (req, res) => {
 
 app.get('/api/creatives', anyAuth, (req, res) => {
   const { geo_id } = req.query;
-  let q = 'SELECT c.*, g.name as geo_name FROM creatives c LEFT JOIN geos g ON g.id = c.geo_id';
-  if (geo_id) q += ` WHERE c.geo_id = ${parseInt(geo_id)}`;
-  q += ' ORDER BY c.name';
-  const creatives = db.prepare(q).all();
-  const result = creatives.map(c => {
-    const adsets = db.prepare(`
-      SELECT a.*, g.name as geo_name, ag.name as agent_name
-      FROM adsets a
-      LEFT JOIN geos g ON g.id = a.geo_id
-      LEFT JOIN agents ag ON ag.id = a.agent_id
-      WHERE a.creative_id = ? ORDER BY a.name
-    `).all(c.id);
-    return { ...c, adsets };
-  });
-  res.json(result);
+  const cacheKey = geo_id ? `creatives:geo_${geo_id}` : 'creatives:all';
+  res.json(cached(cacheKey, 120000, () => {
+    let q = 'SELECT c.*, g.name as geo_name FROM creatives c LEFT JOIN geos g ON g.id = c.geo_id';
+    if (geo_id) q += ` WHERE c.geo_id = ${parseInt(geo_id)}`;
+    q += ' ORDER BY c.name';
+    const creatives = db.prepare(q).all();
+    return creatives.map(c => {
+      const adsets = db.prepare(`
+        SELECT a.*, g.name as geo_name, ag.name as agent_name
+        FROM adsets a
+        LEFT JOIN geos g ON g.id = a.geo_id
+        LEFT JOIN agents ag ON ag.id = a.agent_id
+        WHERE a.creative_id = ? ORDER BY a.name
+      `).all(c.id);
+      return { ...c, adsets };
+    });
+  }));
 });
 
 app.post('/api/creatives', adminBuyer, (req, res) => {
@@ -623,6 +661,7 @@ app.post('/api/creatives', adminBuyer, (req, res) => {
   if (!name) return err(res, 400, 'Введите название');
   try {
     const result = db.prepare('INSERT INTO creatives (name, geo_id) VALUES (?, ?)').run(name, geo_id || null);
+    invalidateCache('creatives');
     logActivity(req.user.id, req.user.username, 'creative_create', name);
     res.json(db.prepare('SELECT * FROM creatives WHERE id = ?').get(result.lastInsertRowid));
   } catch (e) {
@@ -636,6 +675,7 @@ app.put('/api/creatives/:id', adminBuyer, (req, res) => {
   const old = db.prepare('SELECT * FROM creatives WHERE id = ?').get(req.params.id);
   try {
     db.prepare('UPDATE creatives SET name = ?, geo_id = ? WHERE id = ?').run(name, geo_id || null, req.params.id);
+    invalidateCache('creatives');
     if (old) trackChanges('creatives', req.params.id, old, { name, geo_id: geo_id || null }, req.user.id, req.user.username);
     res.json({ ok: true });
   } catch (e) {
@@ -647,6 +687,7 @@ app.put('/api/creatives/:id', adminBuyer, (req, res) => {
 app.delete('/api/creatives/:id', adminBuyer, (req, res) => {
   softDelete('creatives', req.params.id, req.user.id, req.user.username);
   db.prepare('DELETE FROM creatives WHERE id = ?').run(req.params.id);
+  invalidateCache('creatives');
   logActivity(req.user.id, req.user.username, 'creative_delete', req.params.id);
   res.json({ ok: true });
 });
@@ -769,7 +810,7 @@ app.get('/api/statistics/creatives', adminBuyer, (req, res) => { try {
   const agf = agent_id ? 'AND a.agent_id = ?' : '';
   const se = spendExpr(!without_commission);
 
-  const makeParams = () => {
+  const subParams = () => {
     const p = [];
     if (geo_id) p.push(parseInt(geo_id));
     if (agent_id) p.push(parseInt(agent_id));
@@ -777,19 +818,51 @@ app.get('/api/statistics/creatives', adminBuyer, (req, res) => { try {
     return p;
   };
 
+  // 3 subqueries (spend, chatterfy, deposits) + optional outer WHERE
+  const params = [...subParams(), ...subParams(), ...subParams(), ...(geo_id ? [parseInt(geo_id)] : [])];
+
   const rows = db.prepare(`
     SELECT c.id, c.name AS creative, g.name AS geo,
-      (SELECT COALESCE(SUM(${se}),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_s}) AS spend,
-      (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS pdp,
-      (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS dialogs,
-      (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS registrations,
-      (SELECT COALESCE(SUM(ch.deposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS deposits_count,
-      (SELECT COALESCE(SUM(ch.redeposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_c}) AS redeposits_count,
-      (SELECT COALESCE(SUM(md.amount),0) FROM manual_deposits md JOIN adsets a ON a.id=md.adset_id WHERE a.creative_id=c.id ${gf} ${agf} ${df_d}) AS deposit_amount
-    FROM creatives c LEFT JOIN geos g ON g.id=c.geo_id
+      COALESCE(sp.total_spend, 0) AS spend,
+      COALESCE(ch.total_pdp, 0) AS pdp,
+      COALESCE(ch.total_dialogs, 0) AS dialogs,
+      COALESCE(ch.total_registrations, 0) AS registrations,
+      COALESCE(ch.total_deposits, 0) AS deposits_count,
+      COALESCE(ch.total_redeposits, 0) AS redeposits_count,
+      COALESCE(dp.total_amount, 0) AS deposit_amount
+    FROM creatives c
+    LEFT JOIN geos g ON g.id = c.geo_id
+    LEFT JOIN (
+      SELECT a.creative_id,
+        SUM(${se}) AS total_spend
+      FROM spend_records sr
+      JOIN adsets a ON a.id = sr.adset_id
+      WHERE 1=1 ${gf} ${agf} ${df_s}
+      GROUP BY a.creative_id
+    ) sp ON sp.creative_id = c.id
+    LEFT JOIN (
+      SELECT a.creative_id,
+        SUM(ch.pdp) AS total_pdp,
+        SUM(ch.dialogs) AS total_dialogs,
+        SUM(ch.registrations) AS total_registrations,
+        SUM(ch.deposits) AS total_deposits,
+        SUM(ch.redeposits) AS total_redeposits
+      FROM chatterfy_records ch
+      JOIN adsets a ON a.id = ch.adset_id
+      WHERE 1=1 ${gf} ${agf} ${df_c}
+      GROUP BY a.creative_id
+    ) ch ON ch.creative_id = c.id
+    LEFT JOIN (
+      SELECT a.creative_id,
+        SUM(md.amount) AS total_amount
+      FROM manual_deposits md
+      JOIN adsets a ON a.id = md.adset_id
+      WHERE 1=1 ${gf} ${agf} ${df_d}
+      GROUP BY a.creative_id
+    ) dp ON dp.creative_id = c.id
     ${geo_id ? 'WHERE c.geo_id = ?' : ''}
     ORDER BY c.name
-  `).all(...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...makeParams(), ...(geo_id ? [parseInt(geo_id)] : []));
+  `).all(...params);
 
   res.json(rows.map(r => enrichStats(r)));
 } catch(e) { res.status(500).json({ detail: e.message }); } });
@@ -803,17 +876,49 @@ app.get('/api/statistics/geos', adminBuyer, (req, res) => { try {
   const sp = s ? [s, e] : [];
   const se = spendExpr(!without_commission);
 
+  // 3 subqueries: spend, chatterfy, deposits
+  const params = [...sp, ...sp, ...sp];
+
   const rows = db.prepare(`
     SELECT t.id, t.name AS geo, t.abbreviation,
-      (SELECT COALESCE(SUM(${se}),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.geo_id=t.id ${df_s}) AS spend,
-      (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS pdp,
-      (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS dialogs,
-      (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS registrations,
-      (SELECT COALESCE(SUM(ch.deposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS deposits_count,
-      (SELECT COALESCE(SUM(ch.redeposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.geo_id=t.id ${df_c}) AS redeposits_count,
-      (SELECT COALESCE(SUM(md.amount),0) FROM manual_deposits md JOIN adsets a ON a.id=md.adset_id WHERE a.geo_id=t.id ${df_d}) AS deposit_amount
-    FROM geos t ORDER BY t.name
-  `).all(...sp, ...sp, ...sp, ...sp, ...sp, ...sp, ...sp);
+      COALESCE(sp.total_spend, 0) AS spend,
+      COALESCE(ch.total_pdp, 0) AS pdp,
+      COALESCE(ch.total_dialogs, 0) AS dialogs,
+      COALESCE(ch.total_registrations, 0) AS registrations,
+      COALESCE(ch.total_deposits, 0) AS deposits_count,
+      COALESCE(ch.total_redeposits, 0) AS redeposits_count,
+      COALESCE(dp.total_amount, 0) AS deposit_amount
+    FROM geos t
+    LEFT JOIN (
+      SELECT a.geo_id,
+        SUM(${se}) AS total_spend
+      FROM spend_records sr
+      JOIN adsets a ON a.id = sr.adset_id
+      WHERE 1=1 ${df_s}
+      GROUP BY a.geo_id
+    ) sp ON sp.geo_id = t.id
+    LEFT JOIN (
+      SELECT a.geo_id,
+        SUM(ch.pdp) AS total_pdp,
+        SUM(ch.dialogs) AS total_dialogs,
+        SUM(ch.registrations) AS total_registrations,
+        SUM(ch.deposits) AS total_deposits,
+        SUM(ch.redeposits) AS total_redeposits
+      FROM chatterfy_records ch
+      JOIN adsets a ON a.id = ch.adset_id
+      WHERE 1=1 ${df_c}
+      GROUP BY a.geo_id
+    ) ch ON ch.geo_id = t.id
+    LEFT JOIN (
+      SELECT a.geo_id,
+        SUM(md.amount) AS total_amount
+      FROM manual_deposits md
+      JOIN adsets a ON a.id = md.adset_id
+      WHERE 1=1 ${df_d}
+      GROUP BY a.geo_id
+    ) dp ON dp.geo_id = t.id
+    ORDER BY t.name
+  `).all(...params);
 
   res.json(rows.map(r => enrichStats(r)));
 } catch(e) { res.status(500).json({ detail: e.message }); } });
@@ -827,17 +932,49 @@ app.get('/api/statistics/agents', adminBuyer, (req, res) => { try {
   const sp = s ? [s, e] : [];
   const se = spendExpr(!without_commission);
 
+  // 3 subqueries: spend, chatterfy, deposits
+  const params = [...sp, ...sp, ...sp];
+
   const rows = db.prepare(`
     SELECT t.id, t.name AS agent, t.abbreviation,
-      (SELECT COALESCE(SUM(${se}),0) FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.agent_id=t.id ${df_s}) AS spend,
-      (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS pdp,
-      (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS dialogs,
-      (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS registrations,
-      (SELECT COALESCE(SUM(ch.deposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS deposits_count,
-      (SELECT COALESCE(SUM(ch.redeposits),0) FROM chatterfy_records ch JOIN adsets a ON a.id=ch.adset_id WHERE a.agent_id=t.id ${df_c}) AS redeposits_count,
-      (SELECT COALESCE(SUM(md.amount),0) FROM manual_deposits md JOIN adsets a ON a.id=md.adset_id WHERE a.agent_id=t.id ${df_d}) AS deposit_amount
-    FROM agents t ORDER BY t.name
-  `).all(...sp, ...sp, ...sp, ...sp, ...sp, ...sp, ...sp);
+      COALESCE(sp.total_spend, 0) AS spend,
+      COALESCE(ch.total_pdp, 0) AS pdp,
+      COALESCE(ch.total_dialogs, 0) AS dialogs,
+      COALESCE(ch.total_registrations, 0) AS registrations,
+      COALESCE(ch.total_deposits, 0) AS deposits_count,
+      COALESCE(ch.total_redeposits, 0) AS redeposits_count,
+      COALESCE(dp.total_amount, 0) AS deposit_amount
+    FROM agents t
+    LEFT JOIN (
+      SELECT a.agent_id,
+        SUM(${se}) AS total_spend
+      FROM spend_records sr
+      JOIN adsets a ON a.id = sr.adset_id
+      WHERE 1=1 ${df_s}
+      GROUP BY a.agent_id
+    ) sp ON sp.agent_id = t.id
+    LEFT JOIN (
+      SELECT a.agent_id,
+        SUM(ch.pdp) AS total_pdp,
+        SUM(ch.dialogs) AS total_dialogs,
+        SUM(ch.registrations) AS total_registrations,
+        SUM(ch.deposits) AS total_deposits,
+        SUM(ch.redeposits) AS total_redeposits
+      FROM chatterfy_records ch
+      JOIN adsets a ON a.id = ch.adset_id
+      WHERE 1=1 ${df_c}
+      GROUP BY a.agent_id
+    ) ch ON ch.agent_id = t.id
+    LEFT JOIN (
+      SELECT a.agent_id,
+        SUM(md.amount) AS total_amount
+      FROM manual_deposits md
+      JOIN adsets a ON a.id = md.adset_id
+      WHERE 1=1 ${df_d}
+      GROUP BY a.agent_id
+    ) dp ON dp.agent_id = t.id
+    ORDER BY t.name
+  `).all(...params);
 
   res.json(rows.map(r => {
     const base = enrichStats(r);
@@ -862,20 +999,51 @@ app.get('/api/statistics/drilldown', adminBuyer, (req, res) => { try {
   const df_d = s ? 'AND md.date BETWEEN ? AND ?' : '';
   const sp = s ? [s, e] : [];
   const filterCol = type === 'creative' ? 'a.creative_id' : type === 'geo' ? 'a.geo_id' : 'a.agent_id';
-  // For drilldown, we need 'a' alias for the adset itself to get agent_id for commission
+  // For drilldown, commission uses the outer adset's agent_id
   const seDD = without_commission ? 'sr.amount' : `sr.amount * (1 + COALESCE((SELECT ac.commission_pct / 100.0 FROM agent_commissions ac WHERE ac.agent_id = a.agent_id AND ac.effective_from <= sr.date ORDER BY ac.effective_from DESC LIMIT 1), 0))`;
+
+  // 3 subqueries each get date params, then the outer WHERE gets the id filter
+  const params = [...sp, ...sp, ...sp, parseInt(id)];
 
   const rows = db.prepare(`
     SELECT a.id, a.name AS adset,
-      (SELECT COALESCE(SUM(${seDD}),0) FROM spend_records sr WHERE sr.adset_id=a.id ${df_s}) AS spend,
-      (SELECT COALESCE(SUM(ch.pdp),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS pdp,
-      (SELECT COALESCE(SUM(ch.dialogs),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS dialogs,
-      (SELECT COALESCE(SUM(ch.registrations),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS registrations,
-      (SELECT COALESCE(SUM(ch.deposits),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS deposits_count,
-      (SELECT COALESCE(SUM(ch.redeposits),0) FROM chatterfy_records ch WHERE ch.adset_id=a.id ${df_c}) AS redeposits_count,
-      (SELECT COALESCE(SUM(md.amount),0) FROM manual_deposits md WHERE md.adset_id=a.id ${df_d}) AS deposit_amount
-    FROM adsets a WHERE ${filterCol} = ? ORDER BY a.name
-  `).all(...sp, ...sp, ...sp, ...sp, ...sp, ...sp, ...sp, parseInt(id));
+      COALESCE(sp.total_spend, 0) AS spend,
+      COALESCE(ch.total_pdp, 0) AS pdp,
+      COALESCE(ch.total_dialogs, 0) AS dialogs,
+      COALESCE(ch.total_registrations, 0) AS registrations,
+      COALESCE(ch.total_deposits, 0) AS deposits_count,
+      COALESCE(ch.total_redeposits, 0) AS redeposits_count,
+      COALESCE(dp.total_amount, 0) AS deposit_amount
+    FROM adsets a
+    LEFT JOIN (
+      SELECT sr.adset_id,
+        SUM(${seDD}) AS total_spend
+      FROM spend_records sr
+      JOIN adsets a ON a.id = sr.adset_id
+      WHERE 1=1 ${df_s}
+      GROUP BY sr.adset_id
+    ) sp ON sp.adset_id = a.id
+    LEFT JOIN (
+      SELECT ch.adset_id,
+        SUM(ch.pdp) AS total_pdp,
+        SUM(ch.dialogs) AS total_dialogs,
+        SUM(ch.registrations) AS total_registrations,
+        SUM(ch.deposits) AS total_deposits,
+        SUM(ch.redeposits) AS total_redeposits
+      FROM chatterfy_records ch
+      WHERE 1=1 ${df_c}
+      GROUP BY ch.adset_id
+    ) ch ON ch.adset_id = a.id
+    LEFT JOIN (
+      SELECT md.adset_id,
+        SUM(md.amount) AS total_amount
+      FROM manual_deposits md
+      WHERE 1=1 ${df_d}
+      GROUP BY md.adset_id
+    ) dp ON dp.adset_id = a.id
+    WHERE ${filterCol} = ?
+    ORDER BY a.name
+  `).all(...params);
 
   res.json(rows.map(r => enrichStats(r)));
 } catch(e) { res.status(500).json({ detail: e.message }); } });
@@ -927,12 +1095,18 @@ app.get('/api/deposits', requireAuth('admin', 'buyer', 'operator'), (req, res) =
   if (s) { q += ' AND md.date BETWEEN ? AND ?'; params.push(s, e); }
   if (req.user.role === 'operator') {
     const geoIds = getOperatorGeoIds(req.user.id);
-    if (!geoIds.length) return res.json([]);
+    if (!geoIds.length) return res.json({ data: [], total: 0, limit: 100, offset: 0 });
     q += ` AND a.geo_id IN (${geoIds.map(() => '?').join(',')})`;
     params.push(...geoIds);
   }
   q += ' ORDER BY md.date DESC, md.id DESC';
-  res.json(db.prepare(q).all(...params));
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  const countQ = q.replace(/SELECT md\.\*.*?FROM /s, 'SELECT COUNT(*) as cnt FROM ').replace(/ ORDER BY .+$/, '');
+  const total = db.prepare(countQ).get(...params).cnt;
+  q += ' LIMIT ? OFFSET ?';
+  const data = db.prepare(q).all(...params, limit, offset);
+  res.json({ data, total, limit, offset });
 });
 
 app.post('/api/deposits', requireAuth('admin','buyer','operator'), (req, res) => {
@@ -1053,22 +1227,25 @@ app.post('/api/import/spend', adminBuyer, (req, res) => {
   })();
   logActivity(req.user.id, req.user.username, 'import_spend', 'imported ' + imported);
   broadcast('data_update', { type: 'import_spend' });
+  broadcastBudgetAlerts();
   res.json({ ok: true, imported, undefined_adsets: [...undefined_adsets] });
 });
 
 app.get('/api/import/spend', adminBuyer, (req, res) => {
   const { month } = req.query;
-  let q = `SELECT sr.*, c.name as creative_name, g.name as geo_name
-           FROM spend_records sr
-           LEFT JOIN adsets a ON a.id = sr.adset_id
-           LEFT JOIN creatives c ON c.id = a.creative_id
-           LEFT JOIN geos g ON g.id = a.geo_id
-           WHERE 1=1`;
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  let where = ' WHERE 1=1';
   const params = [];
   const [s, e] = monthRange(month);
-  if (s) { q += ' AND sr.date BETWEEN ? AND ?'; params.push(s, e); }
-  q += ' ORDER BY sr.date DESC, sr.id DESC';
-  res.json(db.prepare(q).all(...params));
+  if (s) { where += ' AND sr.date BETWEEN ? AND ?'; params.push(s, e); }
+  const from = ` FROM spend_records sr
+           LEFT JOIN adsets a ON a.id = sr.adset_id
+           LEFT JOIN creatives c ON c.id = a.creative_id
+           LEFT JOIN geos g ON g.id = a.geo_id`;
+  const total = db.prepare(`SELECT COUNT(*) as cnt${from}${where}`).get(...params).cnt;
+  const data = db.prepare(`SELECT sr.*, c.name as creative_name, g.name as geo_name${from}${where} ORDER BY sr.date DESC, sr.id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  res.json({ data, total, limit, offset });
 });
 
 // ─── IMPORT: CHATTERFY ───────────────────────────────────────────────────────
@@ -1118,17 +1295,19 @@ app.post('/api/import/chatterfy', adminBuyer, (req, res) => {
 
 app.get('/api/import/chatterfy', adminBuyer, (req, res) => {
   const { month } = req.query;
-  let q = `SELECT cr.*, a.name as adset_name2, c.name as creative_name, g.name as geo_name
-           FROM chatterfy_records cr
-           LEFT JOIN adsets a ON a.id = cr.adset_id
-           LEFT JOIN creatives c ON c.id = a.creative_id
-           LEFT JOIN geos g ON g.id = a.geo_id
-           WHERE 1=1`;
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  let where = ' WHERE 1=1';
   const params = [];
   const [s, e] = monthRange(month);
-  if (s) { q += ' AND cr.date BETWEEN ? AND ?'; params.push(s, e); }
-  q += ' ORDER BY cr.date DESC, cr.id DESC';
-  res.json(db.prepare(q).all(...params));
+  if (s) { where += ' AND cr.date BETWEEN ? AND ?'; params.push(s, e); }
+  const from = ` FROM chatterfy_records cr
+           LEFT JOIN adsets a ON a.id = cr.adset_id
+           LEFT JOIN creatives c ON c.id = a.creative_id
+           LEFT JOIN geos g ON g.id = a.geo_id`;
+  const total = db.prepare(`SELECT COUNT(*) as cnt${from}${where}`).get(...params).cnt;
+  const data = db.prepare(`SELECT cr.*, a.name as adset_name2, c.name as creative_name, g.name as geo_name${from}${where} ORDER BY cr.date DESC, cr.id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  res.json({ data, total, limit, offset });
 });
 
 function cleanupOrphanedAdset(adsetId) {
@@ -1336,6 +1515,7 @@ app.post('/api/import/fbtool-spend', adminBuyer, async (req, res) => {
       })();
     }
     logActivity(req.user.id, req.user.username, 'import_fbtool_spend', 'imported ' + imported);
+    broadcastBudgetAlerts();
     res.json({ ok: true, imported, undefined_adsets: [...undefined_adsets] });
   } catch (e) {
     res.status(500).json({ detail: 'FBTool API ошибка: ' + e.message });
@@ -1661,11 +1841,65 @@ app.delete('/api/budgets/:id', adminOnly, (req, res) => {
   res.json({ ok: true });
 });
 
+
+// ─── BUDGET STATUS ────────────────────────────────────────────────────────────
+
+function checkBudgets() {
+  const budgets = db.prepare(`SELECT b.*, CASE b.entity_type
+    WHEN 'buyer' THEN (SELECT username FROM users WHERE id=b.entity_id)
+    WHEN 'geo' THEN (SELECT name FROM geos WHERE id=b.entity_id)
+    WHEN 'agent' THEN (SELECT name FROM agents WHERE id=b.entity_id)
+    END AS entity_name FROM budgets b`).all();
+
+  const today = new Date().toISOString().slice(0, 10);
+  return budgets.map(b => {
+    let dateFilter;
+    if (b.type === 'daily') {
+      dateFilter = `sr.date = '${today}'`;
+    } else if (b.type === 'weekly') {
+      const d = new Date(); d.setDate(d.getDate() - 6);
+      dateFilter = `sr.date BETWEEN '${d.toISOString().slice(0,10)}' AND '${today}'`;
+    } else {
+      dateFilter = `sr.date BETWEEN '${today.slice(0,7)}-01' AND '${today}'`;
+    }
+
+    let spent = 0;
+    if (b.entity_type === 'buyer') {
+      spent = db.prepare(`SELECT COALESCE(SUM(sr.amount),0) AS v FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.buyer_id=? AND ${dateFilter}`).get(b.entity_id).v;
+    } else if (b.entity_type === 'geo') {
+      spent = db.prepare(`SELECT COALESCE(SUM(sr.amount),0) AS v FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.geo_id=? AND ${dateFilter}`).get(b.entity_id).v;
+    } else if (b.entity_type === 'agent') {
+      spent = db.prepare(`SELECT COALESCE(SUM(sr.amount),0) AS v FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE a.agent_id=? AND ${dateFilter}`).get(b.entity_id).v;
+    }
+
+    const pct = b.amount > 0 ? +(spent / b.amount * 100).toFixed(1) : 0;
+    return { ...b, entity_name: b.entity_name, current_spend: +spent.toFixed(2), pct, alert: pct >= 80 };
+  });
+}
+
+app.get('/api/budgets/status', adminOnly, (req, res) => {
+  res.json(checkBudgets());
+});
+
+function broadcastBudgetAlerts() {
+  try {
+    const statuses = checkBudgets();
+    for (const b of statuses) {
+      if (b.alert) {
+        broadcast('budget_alert', { entity: b.entity_name, pct: b.pct, limit: b.amount });
+      }
+    }
+  } catch {}
+}
+
 // ─── ACTIVITY LOG ────────────────────────────────────────────────────────────
 
 app.get('/api/activity-log', adminOnly, (req, res) => {
-  const rows = db.prepare('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT 200').all();
-  res.json(rows);
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  const total = db.prepare('SELECT COUNT(*) as cnt FROM activity_log').get().cnt;
+  const data = db.prepare('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset);
+  res.json({ data, total, limit, offset });
 });
 
 // Bulk delete import records
@@ -1714,10 +1948,14 @@ app.delete('/api/import/chatterfy/bulk', adminBuyer, (req, res) => {
 app.get('/api/deleted', adminBuyer, (req, res) => {
   // Auto-purge old records
   db.prepare("DELETE FROM deleted_records WHERE deleted_at < datetime('now', '-30 days')").run();
-  const rows = req.user.role === 'admin'
-    ? db.prepare('SELECT * FROM deleted_records ORDER BY deleted_at DESC').all()
-    : db.prepare('SELECT * FROM deleted_records WHERE deleted_by = ? ORDER BY deleted_at DESC').all(req.user.id);
-  res.json(rows);
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  const isAdmin = req.user.role === 'admin';
+  const whereClause = isAdmin ? '' : ' WHERE deleted_by = ?';
+  const baseParams = isAdmin ? [] : [req.user.id];
+  const total = db.prepare('SELECT COUNT(*) as cnt FROM deleted_records' + whereClause).get(...baseParams).cnt;
+  const data = db.prepare('SELECT * FROM deleted_records' + whereClause + ' ORDER BY deleted_at DESC LIMIT ? OFFSET ?').all(...baseParams, limit, offset);
+  res.json({ data, total, limit, offset });
 });
 
 app.post('/api/deleted/:id/restore', adminBuyer, (req, res) => {
@@ -1825,6 +2063,20 @@ app.get('/api/events', (req, res) => {
   // Heartbeat every 30s
   const hb = setInterval(() => { try { res.write(':\n\n'); } catch { clearInterval(hb); sseClients.delete(res); } }, 30000);
   req.on('close', () => clearInterval(hb));
+});
+
+
+// ─── RESET DB ─────────────────────────────────────────────────────────────────
+
+app.post('/api/admin/reset-db', adminOnly, (req, res) => {
+  const tables = ['spend_records', 'chatterfy_records', 'manual_deposits', 'adsets', 'creatives',
+    'team_expenses', 'activity_log', 'deleted_records', 'data_changes', 'offers', 'budgets'];
+  db.transaction(() => {
+    for (const t of tables) db.prepare('DELETE FROM ' + t).run();
+    db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('" + tables.join("','") + "')").run();
+  })();
+  logActivity(req.user.id, req.user.username, 'reset_db', 'All operational data cleared');
+  res.json({ ok: true });
 });
 
 // ─── START ───────────────────────────────────────────────────────────────────
