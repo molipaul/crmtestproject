@@ -154,7 +154,7 @@
       <li class="nav-item"><button class="nav-link active" data-dict="geos"><i class="bi bi-globe2 me-1"></i>Гео</button></li>
       <li class="nav-item"><button class="nav-link" data-dict="agents"><i class="bi bi-people me-1"></i>Агенты</button></li>
       <li class="nav-item"><button class="nav-link" data-dict="creatives"><i class="bi bi-layers me-1"></i>Креативы</button></li>
-      <li class="nav-item"><button class="nav-link" data-dict="undefined"><i class="bi bi-question-circle me-1"></i>Неопределённые</button></li>
+      <li class="nav-item"><button class="nav-link" data-dict="undefined"><i class="bi bi-question-circle me-1"></i>Нераспознанные</button></li>
     </ul>
 
     <div id="dict-geos">
@@ -210,14 +210,17 @@
             <option value="">Все гео</option>
           </select>
         </div>
-        <button class="btn btn-sm btn-primary" onclick="App.Creatives.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-primary" onclick="App.Creatives.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
+          <button class="btn btn-sm btn-outline-primary" onclick="App.Creatives.openBulkAdd()"><i class="bi bi-list-ul me-1"></i>Добавить список</button>
+        </div>
       </div>
       <div id="creativesContainer"></div>
     </div>
 
     <div id="dict-undefined" class="d-none">
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="mb-0 text-muted">Неопределённые адсеты</h6>
+        <h6 class="mb-0 text-muted">Нераспознанные адсеты</h6>
         <div class="d-flex gap-2">
           <button class="btn btn-sm btn-outline-warning" onclick="App.Undefined.reParse()"><i class="bi bi-arrow-repeat me-1"></i>Обновить словарь</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="App.Undefined.load()"><i class="bi bi-arrow-clockwise me-1"></i>Обновить</button>
@@ -281,38 +284,21 @@
 
       <!-- Range mode: from–to + geo -->
       <div id="statsFilterRange" class="d-flex gap-2 align-items-center flex-wrap">
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsFrom" onchange="App.Stats.clearShortcuts()" title="С" />
-        <span class="text-muted small">—</span>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="statsTo" onchange="App.Stats.clearShortcuts()" title="По" />
+        <input type="text" class="form-control form-control-sm date-range-picker" id="statsDateRange" placeholder="Выберите период" style="width:220px" readonly />
         <select class="form-select form-select-sm w-auto" id="statsGeoFilter" title="Фильтр по гео">
           <option value="">Все гео</option>
         </select>
         <button class="btn btn-sm btn-primary" onclick="App.Stats.applyFilters()" id="statsApplyBtn">
           <i class="bi bi-check2 me-1"></i>Применить
         </button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="App.Stats.clearFilters()" title="Сбросить фильтры">
-          <i class="bi bi-x-lg"></i>
-        </button>
-        <div class="dropdown d-inline-block">
-          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" title="Пресеты фильтров"><i class="bi bi-bookmark"></i></button>
-          <ul class="dropdown-menu dropdown-menu-end" id="statsPresetsMenu">
-            <li><a class="dropdown-item small" href="#" onclick="App.Stats.savePreset();return false"><i class="bi bi-plus-circle me-1"></i>Сохранить текущий</a></li>
-            <li><hr class="dropdown-divider"></li>
-            <li class="text-muted small px-3 py-1" id="noPresetsHint">Нет сохранённых</li>
-          </ul>
-        </div>
       </div>
 
       <!-- Compare mode -->
       <div id="statsFilterCompare" class="d-flex gap-2 align-items-center flex-wrap d-none">
         <span class="badge period-a">A</span>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpFromA" title="Период A — с" />
-        <span class="text-muted small">—</span>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpToA" title="по" />
+        <input type="text" class="form-control form-control-sm date-range-picker" style="width:220px" id="cmpRangeA" placeholder="Период A" readonly />
         <span class="badge period-b">B</span>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpFromB" title="Период B — с" />
-        <span class="text-muted small">—</span>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="cmpToB" title="по" />
+        <input type="text" class="form-control form-control-sm date-range-picker" style="width:220px" id="cmpRangeB" placeholder="Период B" readonly />
         <button class="btn btn-sm btn-outline-primary" onclick="App.Stats.load()"><i class="bi bi-layout-split"></i> Сравнить</button>
       </div>
 
@@ -532,9 +518,7 @@
                 <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolApiKey" placeholder="kV8jecAeAL..." />
               </div>
               <div class="mb-2">
-                <label class="form-label small d-flex justify-content-between">ID аккаунтов (через запятую)
-                  <button class="btn btn-link btn-sm p-0 text-muted" onclick="App.Import.autoFillFBToolAccounts()" title="Заполнить из кабинетов"><i class="bi bi-arrow-repeat"></i> Из кабинетов</button>
-                </label>
+                <label class="form-label small">ID аккаунтов (через запятую)</label>
                 <input type="text" class="form-control form-control-sm font-monospace" id="fbtoolAccounts" placeholder="18850199, 18865827, ..." />
               </div>
               <div class="mb-2 d-flex gap-2">
@@ -625,10 +609,6 @@
                 <textarea class="form-control form-control-sm font-monospace" id="chatterfyData" rows="8"
                   placeholder="BRhan202B1	5	20	10	3	1&#10;ARhan202B2	8	30	15	5	2"></textarea>
               </div>
-              <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="chatterfyReplaceDups" checked />
-                <label class="form-check-label small" for="chatterfyReplaceDups">Заменить дубли (если дата+адсет уже импортированы)</label>
-              </div>
               <button class="btn btn-primary btn-sm w-100" onclick="App.Import.processChatterfy()"><i class="bi bi-lightning me-1"></i>Обработать</button>
             </div>
           </div>
@@ -686,9 +666,7 @@
           <span class="date-shortcut" onclick="App.Dashboard.shortcut('month')">Месяц</span>
           <span class="date-shortcut" onclick="App.Dashboard.shortcut('prevmonth')">Пр. месяц</span>
         </div>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="dashFrom" />
-        <span class="text-muted small">—</span>
-        <input type="date" class="form-control form-control-sm" style="width:140px" id="dashTo" />
+        <input type="text" class="form-control form-control-sm date-range-picker" id="dashDateRange" placeholder="Выберите период" style="width:220px" readonly />
         <button class="btn btn-sm btn-primary" onclick="App.Dashboard.load()" id="dashApplyBtn">
           <i class="bi bi-check2 me-1"></i>Применить
         </button>
@@ -774,9 +752,7 @@
           <span class="date-shortcut" onclick="App.Dashboard.plShortcut('prevmonth')">Пр. месяц</span>
           <button class="btn btn-sm btn-outline-secondary ms-2" onclick="App.Dashboard.plCompare()" title="Сравнить с предыдущим периодом"><i class="bi bi-layout-split me-1"></i>Сравнить</button>
         </div>
-        <input type="date" class="form-control form-control-sm w-auto" id="plFrom" onchange="App.Dashboard.loadPL()" title="С" />
-        <span class="text-muted small">—</span>
-        <input type="date" class="form-control form-control-sm w-auto" id="plTo" onchange="App.Dashboard.loadPL()" title="По" />
+        <input type="text" class="form-control form-control-sm date-range-picker w-auto" id="plDateRange" placeholder="Выберите период" style="width:220px" readonly />
         <button class="btn btn-sm btn-primary ms-auto" onclick="App.Expenses.openAdd()"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
         <button class="btn btn-sm btn-outline-secondary" onclick="App.Export.toCSV('plEntriesTbody','pl-export')"><i class="bi bi-download"></i></button>
       </div>
@@ -953,6 +929,30 @@
       <div class="modal-footer py-2">
         <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
         <button class="btn btn-sm btn-primary" onclick="App.Creatives.save()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BULK CREATIVE -->
+<div class="modal fade" id="bulkCreativeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h6 class="modal-title">Добавить список креативов</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small">Гео</label>
+          <select class="form-select form-select-sm" id="bulkCreativeGeo"></select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Названия (по одному на строку)</label>
+          <textarea class="form-control" id="bulkCreativeNames" rows="8" placeholder="ADH3Gen1&#10;ADH3Gen2&#10;FBstuffA1"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button class="btn btn-sm btn-primary" onclick="App.Creatives.bulkAdd()">Добавить все</button>
       </div>
     </div>
   </div>

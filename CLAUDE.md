@@ -80,7 +80,13 @@ Global state loaded on init: `state.geos`, `state.agents`. Navigation via `showS
 
 **Collapsible sidebar groups**: СЛОВАРИ and ИМПОРТ sections collapse/expand via `toggleNavGroup(id)`, state saved in localStorage.
 
-**Statistics**: loads only on "Применить" button or tab switch (not on date input change). Date shortcut buttons (Вчера, Неделя, etc.) clear active state on manual date change via `clearShortcuts()`. Conversion percentages shown without color, ROI keeps green/red. Filter presets saved in localStorage via bookmark dropdown.
+**Statistics**: loads only on "Применить" button or tab switch (not on date input change). Date shortcut buttons (Вчера, Неделя, etc.) clear active state on manual date change via `clearShortcuts()`. Conversion percentages shown without color, ROI keeps green/red.
+
+**Flatpickr range pickers**: All date ranges use single input with `mode: 'range'` — first click = start, second = end. Helper functions: `initRangePicker()`, `getRangeValues()`, `setRangeValues()`, `clearRangePicker()`. Applied to: stats, dashboard, P&L, compare, FBTool import.
+
+**Creatives per-geo**: Same creative name allowed for different geos (UNIQUE on name+geo_id, not just name). Bulk add via "Добавить список" modal. Inline creative select in Нераспознанные tab filtered by row's geo.
+
+**Adset upsert**: POST /api/adsets does INSERT OR UPDATE — if adset name exists, updates creative_id/geo_id/agent_id instead of failing. Chatterfy import always replaces duplicates (no checkbox).
 
 **SSE (Server-Sent Events)**: `/api/events` endpoint replaces polling. Events: `pending_update`, `data_update`. Auth via query param `?token=`. Fallback to 30s polling if SSE fails. `App.Realtime.init()` manages EventSource lifecycle.
 

@@ -90,6 +90,55 @@ function toast(msg, type = 'success') {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3500);
 }
 
+// ─── RANGE DATE PICKER ───────────────────────────────────────────────────────
+
+function initRangePicker(elementId, onChangeCallback) {
+  const el = document.getElementById(elementId);
+  if (!el || el._flatpickr) return;
+  flatpickr(el, {
+    mode: 'range',
+    dateFormat: 'Y-m-d',
+    locale: 'ru',
+    allowInput: false,
+    disableMobile: true,
+    onChange: (dates, dateStr) => {
+      if (dates.length === 2) {
+        el.dataset.from = dates[0].toISOString().slice(0, 10);
+        el.dataset.to = dates[1].toISOString().slice(0, 10);
+        if (onChangeCallback) onChangeCallback();
+      } else if (dates.length === 1) {
+        el.dataset.from = dates[0].toISOString().slice(0, 10);
+        el.dataset.to = dates[0].toISOString().slice(0, 10);
+      }
+    },
+  });
+}
+
+function getRangeValues(elementId) {
+  const el = document.getElementById(elementId);
+  return { from: el?.dataset.from || '', to: el?.dataset.to || '' };
+}
+
+function setRangeValues(elementId, from, to) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const fp = el._flatpickr;
+  if (fp) {
+    fp.setDate([from, to || from], true);
+  }
+  el.dataset.from = from;
+  el.dataset.to = to || from;
+}
+
+function clearRangePicker(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const fp = el._flatpickr;
+  if (fp) fp.clear();
+  delete el.dataset.from;
+  delete el.dataset.to;
+}
+
 // ─── UI HELPERS ──────────────────────────────────────────────────────────────
 
 function showSkeleton(containerId, count = 3) {
@@ -463,12 +512,19 @@ async function initApp(user) {
     if (dd && !dd.classList.contains('d-none') && !e.target.closest('#sidebarNotifs')) dd.classList.add('d-none');
   });
 
-  // Init flatpickr on all date inputs for modern look
+  // Init flatpickr
   if (typeof flatpickr !== 'undefined') {
     flatpickr.localize(flatpickr.l10ns.ru);
+    // Single-date pickers for non-range inputs (deposits, expenses, etc.)
     document.querySelectorAll('input[type="date"]').forEach(el => {
       flatpickr(el, { dateFormat: 'Y-m-d', allowInput: true, disableMobile: true });
     });
+    // Range date pickers
+    initRangePicker('statsDateRange');
+    initRangePicker('dashDateRange');
+    initRangePicker('plDateRange', () => App.Dashboard.loadPL());
+    initRangePicker('cmpRangeA');
+    initRangePicker('cmpRangeB');
   }
 
   // Stats advanced filter listeners
@@ -694,6 +750,25 @@ App.Creatives = {
     try { await apiFetch(`/api/creatives/${id}`,{method:'DELETE'}); toast('Удалено'); await this.load(); }
     catch(e) { toast(e.message,'danger'); }
   },
+  openBulkAdd() {
+    const sel = document.getElementById('bulkCreativeGeo');
+    sel.innerHTML = state.geos.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+    document.getElementById('bulkCreativeNames').value = '';
+    new bootstrap.Modal(document.getElementById('bulkCreativeModal')).show();
+  },
+  async bulkAdd() {
+    const geo_id = document.getElementById('bulkCreativeGeo').value;
+    const names = document.getElementById('bulkCreativeNames').value.trim().split('\n').map(s => s.trim()).filter(Boolean);
+    if (!names.length) return toast('Введите названия', 'warning');
+    let added = 0, errors = [];
+    for (const name of names) {
+      try { await apiFetch('/api/creatives', { method: 'POST', body: JSON.stringify({ name, geo_id: parseInt(geo_id) }) }); added++; }
+      catch(e) { errors.push(`${name}: ${e.message}`); }
+    }
+    toast(`Добавлено: ${added}/${names.length}${errors.length ? ', ошибки: ' + errors.length : ''}`, errors.length ? 'warning' : 'success');
+    bootstrap.Modal.getInstance(document.getElementById('bulkCreativeModal'))?.hide();
+    await this.load();
+  },
 };
 
 // ─── ADSETS ──────────────────────────────────────────────────────────────────
@@ -774,21 +849,34 @@ App.Undefined = {
   },
   async load() {
     this.data = await apiFetch('/api/adsets?undefined_only=true');
+    this._creatives = await apiFetch('/api/creatives');
     const tb = document.getElementById('undefinedTbody');
     if (!this.data.length) {
       tb.innerHTML = '<tr><td colspan="5">' + emptyState('check-circle', 'Нет неопределённых адсетов') + '</td></tr>';
       return;
     }
-    tb.innerHTML = this.data.map(a => `<tr>
+    tb.innerHTML = this.data.map(a => {
+      const geoCreatives = (this._creatives || []).filter(c => c.geo_id == a.geo_id);
+      const creativeOptions = geoCreatives.map(c => `<option value="${c.id}" ${c.id==a.creative_id?'selected':''}>${c.name}</option>`).join('');
+      return `<tr>
       <td><input type="checkbox" class="form-check-input undef-check" value="${a.id}" onchange="App.Undefined.onCheck()"></td>
       <td class="undefined-adset font-monospace">${a.name}</td>
       <td>${a.geo_name||'<span class="text-danger">не определено</span>'}</td>
       <td>${a.agent_name||'<span class="text-danger">не определено</span>'}</td>
-      <td>${a.creative_name||'<span class="text-muted">—</span>'}</td>
+      <td><select class="form-select form-select-sm" style="width:140px" onchange="App.Undefined.assignCreative(${a.id}, this.value)">
+        <option value="">—</option>${creativeOptions}
+      </select></td>
       <td class="text-end">
         ${btnIcon('pencil','Привязать',`App.Undefined.edit(${a.id})`)}
         ${btnIcon('trash','Удалить',`App.Undefined.del(${a.id})`,true)}
-      </td></tr>`).join('');
+      </td></tr>`;
+    }).join('');
+  },
+  async assignCreative(adsetId, creativeId) {
+    try {
+      await apiFetch(`/api/adsets/${adsetId}`, { method: 'PUT', body: JSON.stringify({ creative_id: creativeId || null }) });
+      toast('Креатив назначен');
+    } catch(e) { toast(e.message, 'danger'); }
   },
   edit(id) {
     const a = this.data.find(x=>x.id===id);
@@ -819,7 +907,18 @@ App.Undefined = {
       };
       fillSel('bulkGeoSelect', state.geos || [], 'name');
       fillSel('bulkAgentSelect', state.agents || [], 'name');
-      apiFetch('/api/creatives').then(c => fillSel('bulkCreativeSelect', c, 'name')).catch(() => {});
+      apiFetch('/api/creatives').then(c => {
+        const sel = document.getElementById('bulkCreativeSelect');
+        if (!sel || sel.options.length > 1) return;
+        c.forEach(i => { const o = document.createElement('option'); o.value = i.id; o.textContent = `${i.name} (${i.geo_name || '?'})`; sel.appendChild(o); });
+      }).catch(() => {});
+      document.getElementById('bulkGeoSelect').addEventListener('change', () => {
+        const geoId = document.getElementById('bulkGeoSelect').value;
+        const sel = document.getElementById('bulkCreativeSelect');
+        sel.innerHTML = '<option value="">Креатив...</option>';
+        const filtered = geoId ? (this._creatives || []).filter(c => c.geo_id == geoId) : (this._creatives || []);
+        filtered.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.name}${c.geo_name?' ('+c.geo_name+')':''}`; sel.appendChild(o); });
+      });
     }
   },
   _getSelectedIds() {
@@ -838,6 +937,8 @@ App.Undefined = {
       toast(`Обновлено: ${res.ok} из ${res.total}`);
       await this.load();
       await checkUndefined();
+      document.getElementById('bulkAssignBar')?.classList.add('d-none');
+      App.BulkDelete.cancel();
     } catch(e) { toast(e.message, 'danger'); }
   },
   async bulkSelectSimilar() {
@@ -912,25 +1013,22 @@ App.Stats = {
       const pmEnd = new Date(today.getFullYear(), today.getMonth(), 0);
       from = fmt(pm); to = fmt(pmEnd);
     }
-    document.getElementById('statsFrom').value = from;
-    document.getElementById('statsTo').value = to;
+    setRangeValues('statsDateRange', from, to);
     // highlight active shortcut
-    document.querySelectorAll('.date-shortcut').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('#statsShortcuts .date-shortcut').forEach(el => el.classList.remove('active'));
     event?.target?.classList.add('active');
     this._activeShortcut = type;
   },
   clearShortcuts() {
-    document.querySelectorAll('.date-shortcut').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('#statsShortcuts .date-shortcut').forEach(el => el.classList.remove('active'));
     this._activeShortcut = null;
   },
 
   async load() {
-    this._renderPresets();
     if (this._mode === 'compare') { await this.loadCompare(); return; }
     // Auto-default to current month on first load
-    const fromEl = document.getElementById('statsFrom');
-    const toEl = document.getElementById('statsTo');
-    if (!fromEl.value && !toEl.value && !this._initialized) {
+    const rv = getRangeValues('statsDateRange');
+    if (!rv.from && !rv.to && !this._initialized) {
       this._initialized = true;
       this.shortcut('month');
       return;
@@ -938,8 +1036,8 @@ App.Stats = {
     const tab = currentStatsTab;
     showSkeleton('statsContent', 2);
     const p = [];
-    const from = fromEl.value;
-    const to   = toEl.value;
+    const from = rv.from;
+    const to   = rv.to;
     const geoId = document.getElementById('statsGeoFilter').value;
     if (from) p.push(`from=${from}`);
     if (to)   p.push(`to=${to}`);
@@ -963,10 +1061,10 @@ App.Stats = {
   },
 
   async loadCompare() {
-    const fromA = document.getElementById('cmpFromA').value;
-    const toA   = document.getElementById('cmpToA').value || fromA;
-    const fromB = document.getElementById('cmpFromB').value;
-    const toB   = document.getElementById('cmpToB').value || fromB;
+    const rvA = getRangeValues('cmpRangeA');
+    const rvB = getRangeValues('cmpRangeB');
+    const fromA = rvA.from, toA = rvA.to || rvA.from;
+    const fromB = rvB.from, toB = rvB.to || rvB.from;
     if (!fromA || !fromB) { toast('Укажите оба периода для сравнения','warning'); return; }
     const tab = currentStatsTab;
     try {
@@ -1028,9 +1126,8 @@ App.Stats = {
   },
 
   async applyFilters() {
-    const from = document.getElementById('statsFrom')?.value;
-    const to = document.getElementById('statsTo')?.value;
-    if (from && to && from > to) { toast('Дата «С» не может быть позже «По»', 'warning'); return; }
+    const rv = getRangeValues('statsDateRange');
+    if (rv.from && rv.to && rv.from > rv.to) { toast('Дата «С» не может быть позже «По»', 'warning'); return; }
     const btn = document.getElementById('statsApplyBtn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Загрузка...';
@@ -1047,74 +1144,19 @@ App.Stats = {
   },
 
   clearFilters() {
-    ['statsFrom','statsTo','cmpFromA','cmpToA','cmpFromB','cmpToB'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.value = '';
-    });
+    clearRangePicker('statsDateRange');
+    clearRangePicker('cmpRangeA');
+    clearRangePicker('cmpRangeB');
     document.getElementById('statsGeoFilter').value = '';
     ['statsAdsetFilter','statsMinSpend','statsMaxSpend','statsMinROI','statsMaxROI'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     const af = document.getElementById('statsAgentFilter'); if (af) af.value = '';
-    document.querySelectorAll('.date-shortcut').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('#statsShortcuts .date-shortcut').forEach(el => el.classList.remove('active'));
     this._activeShortcut = null;
     this.setMode('range');
     this.load();
   },
 
   // Filter presets
-  savePreset() {
-    const name = prompt('Название пресета:');
-    if (!name) return;
-    const preset = {
-      name,
-      from: document.getElementById('statsFrom')?.value || '',
-      to: document.getElementById('statsTo')?.value || '',
-      geo_id: document.getElementById('statsGeoFilter')?.value || '',
-      agent_id: document.getElementById('statsAgentFilter')?.value || '',
-      showZeros: document.getElementById('statsShowZeros')?.checked || false,
-      withoutCommission: document.getElementById('statsWithoutCommission')?.checked || false,
-    };
-    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
-    presets.push(preset);
-    localStorage.setItem('stats_presets', JSON.stringify(presets));
-    this._renderPresets();
-    toast(`Пресет "${name}" сохранён`, 'success');
-  },
-  loadPreset(idx) {
-    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
-    const p = presets[idx];
-    if (!p) return;
-    if (p.from) document.getElementById('statsFrom').value = p.from;
-    if (p.to) document.getElementById('statsTo').value = p.to;
-    document.getElementById('statsGeoFilter').value = p.geo_id || '';
-    const af = document.getElementById('statsAgentFilter'); if (af) af.value = p.agent_id || '';
-    const sz = document.getElementById('statsShowZeros'); if (sz) sz.checked = !!p.showZeros;
-    const wc = document.getElementById('statsWithoutCommission'); if (wc) wc.checked = !!p.withoutCommission;
-    this.load();
-    toast(`Фильтр "${p.name}" применён`, 'info');
-  },
-  deletePreset(idx) {
-    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
-    presets.splice(idx, 1);
-    localStorage.setItem('stats_presets', JSON.stringify(presets));
-    this._renderPresets();
-  },
-  _renderPresets() {
-    const menu = document.getElementById('statsPresetsMenu');
-    if (!menu) return;
-    const presets = JSON.parse(localStorage.getItem('stats_presets') || '[]');
-    const hint = document.getElementById('noPresetsHint');
-    if (hint) hint.style.display = presets.length ? 'none' : '';
-    // Remove old preset items
-    menu.querySelectorAll('.preset-item').forEach(el => el.remove());
-    presets.forEach((p, i) => {
-      const li = document.createElement('li');
-      li.className = 'preset-item';
-      li.innerHTML = `<a class="dropdown-item small d-flex justify-content-between align-items-center" href="#" onclick="App.Stats.loadPreset(${i});return false">
-        <span>${p.name}</span>
-        <button class="btn btn-sm p-0 text-danger" onclick="event.stopPropagation();App.Stats.deletePreset(${i})" title="Удалить"><i class="bi bi-x"></i></button>
-      </a>`;
-      menu.appendChild(li);
-    });
-  },
 
   cols() {
     // Sheet-2 style columns with conversion funnel
@@ -1362,11 +1404,10 @@ App.Stats = {
     // Remove any other open drill-down
     document.querySelectorAll('.drill-row').forEach(el => el.remove());
     document.querySelectorAll('tr[data-drill-open]').forEach(el => { el.style.background = ''; delete el.dataset.drillOpen; });
-    const from = document.getElementById('statsFrom')?.value || '';
-    const to = document.getElementById('statsTo')?.value || '';
+    const drillRv = getRangeValues('statsDateRange');
     const params = [`type=${type}`, `id=${id}`];
-    if (from) params.push(`from=${from}`);
-    if (to) params.push(`to=${to}`);
+    if (drillRv.from) params.push(`from=${drillRv.from}`);
+    if (drillRv.to) params.push(`to=${drillRv.to}`);
     if (document.getElementById('statsWithoutCommission')?.checked) params.push('without_commission=1');
     try {
       const data = await apiFetch(`/api/statistics/drilldown?${params.join('&')}`);
@@ -2103,16 +2144,14 @@ App.Dashboard = {
       const pmEnd = new Date(today.getFullYear(), today.getMonth(), 0);
       from = fmt(pm); to = fmt(pmEnd);
     }
-    document.getElementById('dashFrom').value = from;
-    document.getElementById('dashTo').value = to;
+    setRangeValues('dashDateRange', from, to);
     document.querySelectorAll('#dashShortcuts .date-shortcut').forEach(el => el.classList.remove('active'));
     event?.target?.classList.add('active');
     this.load();
   },
 
   clearFilter() {
-    document.getElementById('dashFrom').value = '';
-    document.getElementById('dashTo').value = '';
+    clearRangePicker('dashDateRange');
     document.querySelectorAll('#dashShortcuts .date-shortcut').forEach(el => el.classList.remove('active'));
     this.load();
   },
@@ -2120,7 +2159,7 @@ App.Dashboard = {
   init() {
     if (!this._initialized) {
       this.shortcut('month');
-      // plFrom/plTo initialized by plShortcut('month') on first load
+      // plDateRange initialized by plShortcut('month') on first load
       // Tab switching
       document.querySelectorAll('#dashTab .nav-link').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -2144,8 +2183,9 @@ App.Dashboard = {
   },
 
   async load() {
-    const from = document.getElementById('dashFrom')?.value;
-    const to = document.getElementById('dashTo')?.value;
+    const dashRv = getRangeValues('dashDateRange');
+    const from = dashRv.from;
+    const to = dashRv.to;
     const params = [];
     if (from) params.push(`from=${from}`);
     if (to) params.push(`to=${to}`);
@@ -2213,8 +2253,6 @@ App.Dashboard = {
 
     // Load funnel
     try {
-      const from = document.getElementById('dashFrom')?.value;
-      const to = document.getElementById('dashTo')?.value;
       if (from && to) {
         const funnelData = await App.Funnel.load(from, to);
         App.Funnel.render('dashFunnel', funnelData);
@@ -2240,16 +2278,16 @@ App.Dashboard = {
       const pmEnd = new Date(today.getFullYear(), today.getMonth(), 0);
       from = fmt(pm); to = fmt(pmEnd);
     }
-    document.getElementById('plFrom').value = from;
-    document.getElementById('plTo').value = to;
+    setRangeValues('plDateRange', from, to);
     document.querySelectorAll('#plShortcuts .date-shortcut').forEach(el => el.classList.remove('active'));
     event?.target?.classList.add('active');
     this.loadPL();
   },
 
   async loadPL() {
-    const from = document.getElementById('plFrom').value;
-    const to = document.getElementById('plTo').value;
+    const plRv = getRangeValues('plDateRange');
+    const from = plRv.from;
+    const to = plRv.to;
     if (!from) { this.plShortcut('month'); return; }
     const qs = `from=${from}&to=${to || from}`;
     try {
@@ -2425,8 +2463,9 @@ App.Dashboard = {
   },
 
   async plCompare() {
-    const from = document.getElementById('plFrom')?.value;
-    const to = document.getElementById('plTo')?.value;
+    const plCmpRv = getRangeValues('plDateRange');
+    const from = plCmpRv.from;
+    const to = plCmpRv.to;
     if (!from || !to) return toast('Выберите период для сравнения', 'warning');
     const d1 = new Date(from), d2 = new Date(to);
     const days = Math.round((d2 - d1) / 86400000);
@@ -2704,6 +2743,9 @@ App.BulkDelete = {
     }
     this._context = null;
     document.getElementById('bulkToolbar').classList.add('d-none');
+    document.getElementById('bulkAssignBar')?.classList.add('d-none');
+    document.querySelectorAll('.undef-check').forEach(cb => cb.checked = false);
+    const ca = document.getElementById('undefinedCheckAll'); if (ca) ca.checked = false;
   },
 
   async execute() {
@@ -2727,12 +2769,9 @@ App.BulkDelete = {
 
 App.PL = {
   init() {
-    // Ensure Flatpickr on P&L date inputs
+    // Ensure range picker on P&L date input
     if (typeof flatpickr !== 'undefined') {
-      ['plFrom','plTo'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el && !el._flatpickr) flatpickr(el, { dateFormat: 'Y-m-d', allowInput: true, disableMobile: true });
-      });
+      initRangePicker('plDateRange', () => App.Dashboard.loadPL());
     }
     App.Dashboard.loadPL();
     this.switchTab('records');

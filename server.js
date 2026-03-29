@@ -681,13 +681,20 @@ app.post('/api/adsets', adminBuyer, (req, res) => {
     if (!agent_id && agentMatch) agent_id = agentMatch.id;
   }
   const is_undefined = (geo_id && agent_id) ? 0 : 1;
+  // Upsert: if adset with same name exists, update it instead of failing
+  const existing = db.prepare('SELECT * FROM adsets WHERE name = ?').get(name);
+  if (existing) {
+    db.prepare('UPDATE adsets SET creative_id = ?, geo_id = COALESCE(?, geo_id), agent_id = COALESCE(?, agent_id), buyer_id = COALESCE(?, buyer_id) WHERE id = ?')
+      .run(creative_id || null, geo_id || null, agent_id || null, buyer_id || null, existing.id);
+    logActivity(req.user.id, req.user.username, 'adset_update', name);
+    return res.json({ ok: true, id: existing.id });
+  }
   try {
     db.prepare('INSERT INTO adsets (name, creative_id, geo_id, agent_id, is_undefined, buyer_id) VALUES (?, ?, ?, ?, ?, ?)')
       .run(name, creative_id || null, geo_id || null, agent_id || null, is_undefined, buyer_id || null);
     logActivity(req.user.id, req.user.username, 'adset_create', name);
     res.json(db.prepare('SELECT * FROM adsets WHERE name = ?').get(name));
   } catch (e) {
-    if (e.message.includes('UNIQUE')) return err(res, 400, 'Адсет с таким именем уже существует');
     err(res, 500, e.message);
   }
 });
@@ -1086,7 +1093,7 @@ app.post('/api/import/chatterfy', adminBuyer, (req, res) => {
       const existing = checkDup.get(adset_name, date);
       if (existing) {
         duplicates++;
-        if (replace_duplicates) update.run(pdp, dia, regs, deps, redeps, adset_name, date);
+        update.run(pdp, dia, regs, deps, redeps, adset_name, date);
         continue;
       }
       const adset = resolveAdset(adset_name);
@@ -1208,9 +1215,7 @@ app.post('/api/import/chatterfy-csv', adminBuyer, (req, res) => {
         const existing = checkDup.get(adset_name, date);
         if (existing) {
           duplicates++;
-          if (replace_duplicates) {
-            update.run(sub, dia, reg, fd, rd, adset_name, date);
-          }
+          update.run(sub, dia, reg, fd, rd, adset_name, date);
           continue;
         }
         const adset = resolveAdset(adset_name);
@@ -1281,6 +1286,7 @@ app.post('/api/import/fbtool-spend', adminBuyer, async (req, res) => {
       const url = `https://fbtool.pro/api/get-statistics?key=${encodeURIComponent(api_key)}&account=${encodeURIComponent(accountID)}&mode=adsets&status=all&dates=${encodeURIComponent(datesParam)}&byDay=1`;
       const response = await fetch(url);
       const json = await response.json();
+      console.log('FBTool response blocks:', json.data?.length, 'first block adsets:', json.data?.[0]?.adsets?.data?.length);
       if (json.error) continue;
 
       const data = json.data || [];

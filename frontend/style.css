@@ -254,7 +254,7 @@ body {
 /* ─── TABLES ─── */
 .crm-table { font-size: 0.82rem; }
 .crm-table thead th {
-  background: var(--bg-muted);
+  background-color: #f0f2f5;
   color: var(--text-muted);
   font-weight: 600;
   border-color: var(--border);
