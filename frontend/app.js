@@ -1490,7 +1490,8 @@ App.Stats = {
       const newRow = document.createElement('tr');
       newRow.className = 'drill-row';
       newRow.innerHTML = `<td colspan="${cols.length}" style="padding:0;background:#f8fafc">
-        <div style="max-height:320px;overflow:auto;margin:4px 0">
+        <div id="drillTrendChart${id}" style="margin-bottom:8px"></div>
+        <div style="max-height:250px;overflow:auto;margin:4px 0">
           <table class="table table-sm table-borderless mb-0" style="font-size:.8rem">
             <thead id="drillThead"><tr style="background:#e8f0fd;position:sticky;top:0"><th style="white-space:nowrap">Адсет</th>${thHtml}</tr></thead>
             <tbody id="drillTbody"></tbody>
@@ -1502,6 +1503,31 @@ App.Stats = {
       trEl.style.background = '#e8f0fd';
       newRow.addEventListener('click', e => e.stopPropagation());
       this._renderDrillBody();
+      // Fetch trends and render mini chart
+      try {
+        const tType = type === 'creative' ? 'creative' : type === 'geo' ? 'geo' : 'agent';
+        const trends = await apiFetch(`/api/statistics/trends?type=${tType}&id=${id}&days=14`);
+        if (trends && trends.length > 1) {
+          const chartEl = document.getElementById('drillTrendChart' + id);
+          if (chartEl) {
+            new ApexCharts(chartEl, {
+              chart: { type: 'area', height: 120, toolbar: { show: false }, fontFamily: 'Inter', sparkline: { enabled: false } },
+              series: [
+                { name: 'Спенд', data: trends.map(t => t.spend) },
+                { name: 'Профит', data: trends.map(t => t.profit) },
+              ],
+              xaxis: { categories: trends.map(t => t.date.slice(5)), labels: { style: { fontSize: '9px' } } },
+              yaxis: { labels: { formatter: v => '$' + (Math.abs(v) >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(0)), style: { fontSize: '9px' } } },
+              colors: ['#ef4444', '#3b82f6'],
+              stroke: { width: 2, curve: 'smooth' },
+              fill: { type: 'gradient', gradient: { opacityFrom: 0.25, opacityTo: 0.05 } },
+              dataLabels: { enabled: false },
+              tooltip: { y: { formatter: v => '$' + v.toFixed(2) } },
+              legend: { position: 'top', fontSize: '10px', markers: { width: 8, height: 8 } },
+            }).render();
+          }
+        }
+      } catch(e) { /* trend chart is optional, don't block drilldown */ }
     } catch(e) { toast('Ошибка загрузки: ' + e.message, 'error'); }
   },
 
@@ -2368,6 +2394,57 @@ App.Dashboard = {
     } catch {}
 
     this.loadTrends();
+
+    // Top profitable / unprofitable
+    try {
+      const { from, to } = getRangeValues('dashDateRange');
+      if (from) {
+        const creatives = await apiFetch(`/api/statistics/creatives?from=${from}&to=${to}`);
+        const withProfit = creatives.filter(c => c.spend > 0 || c.deposit_amount > 0);
+
+        // Top 5 profitable
+        const topProfit = [...withProfit].sort((a, b) => b.profit - a.profit).slice(0, 5).filter(c => c.profit > 0);
+        const profitEl = document.getElementById('dashTopProfit');
+        if (topProfit.length) {
+          profitEl.innerHTML = `<div class="list-group list-group-flush">${topProfit.map((c, i) => `
+            <div class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+              <div>
+                <span class="badge bg-success me-2">${i+1}</span>
+                <span class="small fw-medium">${esc(c.creative)}</span>
+                ${c.geo ? `<span class="text-muted small ms-1">(${esc(c.geo)})</span>` : ''}
+              </div>
+              <div class="text-end">
+                <span class="text-success fw-bold small">+$${fmt(c.profit)}</span>
+                <span class="text-muted small ms-2">ROI ${c.roi}%</span>
+              </div>
+            </div>
+          `).join('')}</div>`;
+        } else {
+          profitEl.innerHTML = '<div class="text-muted small text-center py-3">Нет прибыльных</div>';
+        }
+
+        // Top 5 unprofitable
+        const topLoss = [...withProfit].sort((a, b) => a.profit - b.profit).slice(0, 5).filter(c => c.profit < 0);
+        const lossEl = document.getElementById('dashTopLoss');
+        if (topLoss.length) {
+          lossEl.innerHTML = `<div class="list-group list-group-flush">${topLoss.map((c, i) => `
+            <div class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+              <div>
+                <span class="badge bg-danger me-2">${i+1}</span>
+                <span class="small fw-medium">${esc(c.creative)}</span>
+                ${c.geo ? `<span class="text-muted small ms-1">(${esc(c.geo)})</span>` : ''}
+              </div>
+              <div class="text-end">
+                <span class="text-danger fw-bold small">-$${fmt(Math.abs(c.profit))}</span>
+                <span class="text-muted small ms-2">ROI ${c.roi}%</span>
+              </div>
+            </div>
+          `).join('')}</div>`;
+        } else {
+          lossEl.innerHTML = '<div class="text-muted small text-center py-3">Нет убыточных</div>';
+        }
+      }
+    } catch {}
   },
 
   async loadTrends() {
@@ -2436,6 +2513,29 @@ App.Dashboard = {
           <div>Ср. за ${Math.min(spends.length, 7)}д: <strong>$${avg7d}</strong></div>
         </div>
       `;
+
+      // Inject sparklines into summary metric cards
+      const summaryCards = document.getElementById('summaryCards');
+      if (summaryCards && trends.length > 1) {
+        const spendSpk = sparkline(spends, 50, 16);
+        const depSpk = sparkline(deposits, 50, 16);
+        const profitSpk = sparkline(profits, 50, 16);
+        const roiSpk = sparkline(rois, 50, 16);
+
+        const cards = summaryCards.querySelectorAll('.metric-card');
+        const sparklines = [spendSpk, depSpk, profitSpk, roiSpk];
+        cards.forEach((card, i) => {
+          if (sparklines[i]) {
+            const existing = card.querySelector('.card-sparkline');
+            if (existing) existing.remove();
+            const div = document.createElement('div');
+            div.className = 'card-sparkline';
+            div.style.cssText = 'margin-top:4px';
+            div.innerHTML = sparklines[i];
+            card.querySelector('.metric-value')?.parentElement?.appendChild(div);
+          }
+        });
+      }
     } catch(e) { console.error('Trends error:', e); }
   },
 
