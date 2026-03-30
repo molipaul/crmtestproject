@@ -1700,6 +1700,42 @@ app.get('/api/dashboard/operators', adminOnly, (req, res) => {
   res.json(rows.map(r => ({ ...r, total_amount: +r.total_amount.toFixed(2) })));
 });
 
+app.get('/api/dashboard/trends', requireAuth('admin','buyer'), (req, res) => { try {
+  const days = Math.min(parseInt(req.query.days) || 14, 90);
+  const today = new Date().toISOString().slice(0,10);
+  const fromDate = new Date(Date.now() - days * 86400000).toISOString().slice(0,10);
+
+  const rows = db.prepare(`
+    SELECT d.date,
+      COALESCE(s.spend, 0) AS spend,
+      COALESCE(c.pdp, 0) AS pdp,
+      COALESCE(c.dialogs, 0) AS dialogs,
+      COALESCE(c.registrations, 0) AS registrations,
+      COALESCE(c.deposits, 0) AS deposits_count,
+      COALESCE(c.redeposits, 0) AS redeposits_count,
+      COALESCE(dep.amount, 0) AS deposit_amount
+    FROM (
+      SELECT DISTINCT date FROM spend_records WHERE date BETWEEN ? AND ?
+      UNION SELECT DISTINCT date FROM chatterfy_records WHERE date BETWEEN ? AND ?
+    ) d
+    LEFT JOIN (SELECT date, SUM(amount) AS spend FROM spend_records WHERE date BETWEEN ? AND ? GROUP BY date) s ON s.date = d.date
+    LEFT JOIN (SELECT date, SUM(pdp) AS pdp, SUM(dialogs) AS dialogs, SUM(registrations) AS registrations, SUM(deposits) AS deposits, SUM(redeposits) AS redeposits FROM chatterfy_records WHERE date BETWEEN ? AND ? GROUP BY date) c ON c.date = d.date
+    LEFT JOIN (SELECT date, SUM(amount) AS amount FROM manual_deposits WHERE date BETWEEN ? AND ? AND status='confirmed' GROUP BY date) dep ON dep.date = d.date
+    ORDER BY d.date
+  `).all(fromDate, today, fromDate, today, fromDate, today, fromDate, today, fromDate, today);
+
+  res.json(rows.map(r => ({
+    date: r.date,
+    spend: +r.spend.toFixed(2),
+    deposit_amount: +r.deposit_amount.toFixed(2),
+    profit: +(r.deposit_amount - r.spend).toFixed(2),
+    roi: r.spend > 0 ? +((r.deposit_amount - r.spend) / r.spend * 100).toFixed(1) : 0,
+    pdp: r.pdp,
+    deposits_count: r.deposits_count,
+    cac: r.deposits_count > 0 ? +(r.spend / r.deposits_count).toFixed(2) : 0,
+  })));
+} catch(e) { res.status(500).json({ detail: e.message }); } });
+
 // ─── P&L ─────────────────────────────────────────────────────────────────────
 
 app.get('/api/pl/daily', adminOnly, (req, res) => {

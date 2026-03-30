@@ -678,6 +678,35 @@
       </div>
     </div>
 
+    <!-- Trend Charts -->
+    <div class="row g-3 mt-2" id="dashTrendCharts">
+      <div class="col-lg-8">
+        <div class="card">
+          <div class="card-header py-2 fw-semibold small d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-graph-up me-1"></i>Динамика спендов и доходов</span>
+            <select class="form-select form-select-sm" style="width:auto" id="dashTrendDays" onchange="App.Dashboard.loadTrends()">
+              <option value="7">7 дней</option>
+              <option value="14" selected>14 дней</option>
+              <option value="30">30 дней</option>
+            </select>
+          </div>
+          <div class="card-body py-2" id="dashSpendChart" style="min-height:250px"></div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="card mb-3">
+          <div class="card-header py-2 fw-semibold small"><i class="bi bi-speedometer2 me-1"></i>Burn Rate</div>
+          <div class="card-body text-center" id="dashBurnRate">
+            <div class="text-muted small">Загрузка...</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header py-2 fw-semibold small"><i class="bi bi-percent me-1"></i>ROI тренд</div>
+          <div class="card-body py-2" id="dashROIChart" style="min-height:150px"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="card mt-3" id="dashBudgetCard" style="display:none">
       <div class="card-header py-2 fw-semibold small"><i class="bi bi-wallet2 me-1"></i>Бюджеты</div>
       <div class="card-body p-0" id="dashBudgetBody"></div>

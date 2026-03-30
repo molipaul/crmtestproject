@@ -1257,9 +1257,6 @@ App.Stats = {
       { key:'spend', label: document.getElementById('statsWithoutCommission')?.checked ? 'СПЕНД $' : 'СПЕНД+АГЕНТ $', align:'text-end', type:'usd' },
       { key:'profit', label:'± $', align:'text-end', type:'profit' },
       { key:'roi', label:'% ROI', align:'text-end', type:'roi' },
-      { key:'margin_pct', label:'Маржа %', align:'text-end', type:'pct' },
-      { key:'cac', label:'CAC', align:'text-end', type:'usd' },
-      { key:'arpu', label:'ARPU', align:'text-end', type:'usd' },
     ];
     const agentExtra = [
       { key:'commission_pct', label:'% ком.', align:'text-end', type:'pct1' },
@@ -1421,9 +1418,6 @@ App.Stats = {
       if (totals.dialogs > 0 && totals.registrations > 0) totals.pct_dia_reg = +(totals.registrations/totals.dialogs*100).toFixed(1);
       if (totals.registrations > 0 && totals.deposits_count > 0) totals.pct_reg_dep = +(totals.deposits_count/totals.registrations*100).toFixed(1);
       if (totals.deposits_count > 0 && totals.redeposits_count > 0) totals.pct_dep_redep = +(totals.redeposits_count/totals.deposits_count*100).toFixed(1);
-      totals.margin_pct = totals.deposit_amount > 0 ? +((totals.deposit_amount - totals.spend) / totals.deposit_amount * 100).toFixed(1) : 0;
-      totals.cac = totals.deposits_count > 0 ? +(totals.spend / totals.deposits_count).toFixed(2) : 0;
-      totals.arpu = totals.deposits_count > 0 ? +(totals.deposit_amount / totals.deposits_count).toFixed(2) : 0;
       const totalsHtml = `<tr class="fw-bold" style="background:#f0f4ff;position:sticky;top:0;z-index:2">${cols.map((c, i) => {
         if (i === 0) return `<td class="${c.align}">ИТОГО (${data.length})</td>`;
         if (c.type === 'text') return '<td></td>';
@@ -2372,6 +2366,77 @@ App.Dashboard = {
         body.innerHTML = `<table class="table table-sm crm-table mb-0"><thead><tr><th>Объект</th><th>Тип</th><th>Бюджет</th><th>Потрачено</th><th style="width:100px">%</th><th>Откл.</th></tr></thead><tbody>${budgets.map(b => `<tr class="${b.alert?'table-warning':''}"><td>${esc(b.entity_name||'?')}</td><td><span class="badge bg-secondary">${esc(b.type)}</span></td><td class="text-end">$${fmt(b.amount)}</td><td class="text-end">$${fmt(b.current_spend)}</td><td><div class="progress" style="height:14px"><div class="progress-bar ${b.pct>=80?'bg-danger':b.pct>=50?'bg-warning':'bg-success'}" style="width:${Math.min(b.pct,100)}%"><span style="font-size:.6rem">${b.pct}%</span></div></div></td><td class="text-end small ${(b.variance_pct||0)>0?'text-danger':'text-success'}">${(b.variance_pct||0)>0?'+':''}${b.variance_pct||0}%</td></tr>`).join('')}</tbody></table>`;
       } else { card.style.display = 'none'; }
     } catch {}
+
+    this.loadTrends();
+  },
+
+  async loadTrends() {
+    const days = document.getElementById('dashTrendDays')?.value || 14;
+    try {
+      const trends = await apiFetch(`/api/dashboard/trends?days=${days}`);
+      if (!trends.length) {
+        document.getElementById('dashSpendChart').innerHTML = '<div class="text-muted text-center py-5">Нет данных за период</div>';
+        document.getElementById('dashROIChart').innerHTML = '<div class="text-muted text-center py-5">\u2014</div>';
+        return;
+      }
+
+      const dates = trends.map(t => t.date);
+      const spends = trends.map(t => t.spend);
+      const deposits = trends.map(t => t.deposit_amount);
+      const profits = trends.map(t => t.profit);
+      const rois = trends.map(t => t.roi);
+
+      // Spend + Deposit area chart
+      if (this._spendChart) this._spendChart.destroy();
+      this._spendChart = new ApexCharts(document.getElementById('dashSpendChart'), {
+        chart: { type: 'area', height: 240, toolbar: { show: false }, fontFamily: 'Inter' },
+        series: [
+          { name: 'Спенд', data: spends },
+          { name: 'Доход', data: deposits },
+          { name: 'Профит', data: profits },
+        ],
+        xaxis: { categories: dates, labels: { style: { fontSize: '10px' }, formatter: v => v?.slice(5) } },
+        yaxis: { labels: { formatter: v => '$' + (v >= 1000 ? (v/1000).toFixed(1) + 'k' : v.toFixed(0)) } },
+        colors: ['#ef4444', '#10b981', '#3b82f6'],
+        stroke: { width: 2, curve: 'smooth' },
+        fill: { type: 'gradient', gradient: { opacityFrom: 0.3, opacityTo: 0.05 } },
+        dataLabels: { enabled: false },
+        tooltip: { y: { formatter: v => '$' + v.toFixed(2) } },
+        legend: { position: 'top', fontSize: '11px' },
+      });
+      this._spendChart.render();
+
+      // ROI line chart
+      if (this._roiChart) this._roiChart.destroy();
+      this._roiChart = new ApexCharts(document.getElementById('dashROIChart'), {
+        chart: { type: 'line', height: 140, toolbar: { show: false }, fontFamily: 'Inter', sparkline: { enabled: false } },
+        series: [{ name: 'ROI', data: rois }],
+        xaxis: { categories: dates, labels: { show: false } },
+        yaxis: { labels: { formatter: v => v.toFixed(0) + '%' } },
+        colors: [rois[rois.length-1] >= 0 ? '#10b981' : '#ef4444'],
+        stroke: { width: 2.5, curve: 'smooth' },
+        markers: { size: 0 },
+        dataLabels: { enabled: false },
+        tooltip: { y: { formatter: v => v.toFixed(1) + '%' } },
+        annotations: { yaxis: [{ y: 0, borderColor: '#94a3b8', strokeDashArray: 4 }] },
+      });
+      this._roiChart.render();
+
+      // Burn rate card
+      const todaySpend = spends[spends.length - 1] || 0;
+      const avg7d = spends.length >= 7 ? +(spends.slice(-7).reduce((a,b) => a+b, 0) / 7).toFixed(2) : +(spends.reduce((a,b) => a+b, 0) / spends.length).toFixed(2);
+      const burnPct = avg7d > 0 ? +(todaySpend / avg7d * 100).toFixed(0) : 0;
+      const burnColor = burnPct > 120 ? 'text-danger' : burnPct > 80 ? 'text-warning' : 'text-success';
+      const burnIcon = burnPct > 100 ? 'bi-arrow-up-circle-fill' : burnPct < 80 ? 'bi-arrow-down-circle-fill' : 'bi-dash-circle-fill';
+      document.getElementById('dashBurnRate').innerHTML = `
+        <div class="display-6 fw-bold ${burnColor}">${burnPct}%</div>
+        <div class="small text-muted mt-1"><i class="bi ${burnIcon} me-1"></i>от среднего</div>
+        <div class="mt-2 small">
+          <div>Сегодня: <strong>$${todaySpend.toFixed(2)}</strong></div>
+          <div>Ср. за ${Math.min(spends.length, 7)}д: <strong>$${avg7d}</strong></div>
+        </div>
+      `;
+    } catch(e) { console.error('Trends error:', e); }
   },
 
   _plData: null,
