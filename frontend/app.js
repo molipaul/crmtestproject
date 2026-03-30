@@ -84,6 +84,15 @@ function esc(s) {
   d.textContent = String(s);
   return d.innerHTML;
 }
+function sparkline(values, w=60, h=18) {
+  if (!values || values.length < 2) return '';
+  const max = Math.max(...values), min = Math.min(...values), range = max - min || 1;
+  const step = w / (values.length - 1);
+  const pts = values.map((v, i) => `${(i*step).toFixed(1)},${(h-((v-min)/range)*h*0.8-h*0.1).toFixed(1)}`).join(' ');
+  const trend = values[values.length-1] - values[0];
+  const c = trend > 0 ? '#10b981' : trend < 0 ? '#ef4444' : '#94a3b8';
+  return `<svg width="${w}" height="${h}" style="vertical-align:middle"><polyline points="${pts}" fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+}
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 
@@ -1248,6 +1257,9 @@ App.Stats = {
       { key:'spend', label: document.getElementById('statsWithoutCommission')?.checked ? 'СПЕНД $' : 'СПЕНД+АГЕНТ $', align:'text-end', type:'usd' },
       { key:'profit', label:'± $', align:'text-end', type:'profit' },
       { key:'roi', label:'% ROI', align:'text-end', type:'roi' },
+      { key:'margin_pct', label:'Маржа %', align:'text-end', type:'pct' },
+      { key:'cac', label:'CAC', align:'text-end', type:'usd' },
+      { key:'arpu', label:'ARPU', align:'text-end', type:'usd' },
     ];
     const agentExtra = [
       { key:'commission_pct', label:'% ком.', align:'text-end', type:'pct1' },
@@ -1409,6 +1421,9 @@ App.Stats = {
       if (totals.dialogs > 0 && totals.registrations > 0) totals.pct_dia_reg = +(totals.registrations/totals.dialogs*100).toFixed(1);
       if (totals.registrations > 0 && totals.deposits_count > 0) totals.pct_reg_dep = +(totals.deposits_count/totals.registrations*100).toFixed(1);
       if (totals.deposits_count > 0 && totals.redeposits_count > 0) totals.pct_dep_redep = +(totals.redeposits_count/totals.deposits_count*100).toFixed(1);
+      totals.margin_pct = totals.deposit_amount > 0 ? +((totals.deposit_amount - totals.spend) / totals.deposit_amount * 100).toFixed(1) : 0;
+      totals.cac = totals.deposits_count > 0 ? +(totals.spend / totals.deposits_count).toFixed(2) : 0;
+      totals.arpu = totals.deposits_count > 0 ? +(totals.deposit_amount / totals.deposits_count).toFixed(2) : 0;
       const totalsHtml = `<tr class="fw-bold" style="background:#f0f4ff;position:sticky;top:0;z-index:2">${cols.map((c, i) => {
         if (i === 0) return `<td class="${c.align}">ИТОГО (${data.length})</td>`;
         if (c.type === 'text') return '<td></td>';
@@ -2346,6 +2361,16 @@ App.Dashboard = {
         const funnelData = await App.Funnel.load(from, to);
         App.Funnel.render('dashFunnel', funnelData);
       }
+    } catch {}
+    // Budgets
+    try {
+      const budgets = await apiFetch('/api/budgets/status');
+      const card = document.getElementById('dashBudgetCard');
+      const body = document.getElementById('dashBudgetBody');
+      if (budgets.length) {
+        card.style.display = '';
+        body.innerHTML = `<table class="table table-sm crm-table mb-0"><thead><tr><th>Объект</th><th>Тип</th><th>Бюджет</th><th>Потрачено</th><th style="width:100px">%</th><th>Откл.</th></tr></thead><tbody>${budgets.map(b => `<tr class="${b.alert?'table-warning':''}"><td>${esc(b.entity_name||'?')}</td><td><span class="badge bg-secondary">${esc(b.type)}</span></td><td class="text-end">$${fmt(b.amount)}</td><td class="text-end">$${fmt(b.current_spend)}</td><td><div class="progress" style="height:14px"><div class="progress-bar ${b.pct>=80?'bg-danger':b.pct>=50?'bg-warning':'bg-success'}" style="width:${Math.min(b.pct,100)}%"><span style="font-size:.6rem">${b.pct}%</span></div></div></td><td class="text-end small ${(b.variance_pct||0)>0?'text-danger':'text-success'}">${(b.variance_pct||0)>0?'+':''}${b.variance_pct||0}%</td></tr>`).join('')}</tbody></table>`;
+      } else { card.style.display = 'none'; }
     } catch {}
   },
 

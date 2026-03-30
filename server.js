@@ -1063,6 +1063,43 @@ app.get('/api/statistics/drilldown', adminBuyer, (req, res) => { try {
   res.json(rows.map(r => enrichStats(r)));
 } catch(e) { res.status(500).json({ detail: e.message }); } });
 
+app.get('/api/statistics/trends', adminBuyer, (req, res) => { try {
+  const { type, id, ids, days } = req.query;
+  const numDays = Math.min(parseInt(days) || 14, 90);
+  const today = new Date().toISOString().slice(0,10);
+  const fromDate = new Date(Date.now() - numDays * 86400000).toISOString().slice(0,10);
+  const filterCol = type === 'creative' ? 'a.creative_id' : type === 'geo' ? 'a.geo_id' : 'a.agent_id';
+
+  // Batch mode: multiple ids
+  const idList = ids ? ids.split(',').map(Number).filter(Boolean) : id ? [parseInt(id)] : [];
+  if (!idList.length) return err(res, 400, 'id or ids required');
+
+  const result = {};
+  for (const eid of idList) {
+    const rows = db.prepare(`
+      SELECT sr.date,
+        COALESCE(SUM(sr.amount), 0) AS spend,
+        COALESCE((SELECT SUM(ch.deposits) FROM chatterfy_records ch JOIN adsets a2 ON a2.id=ch.adset_id WHERE ${filterCol.replace('a.','a2.')}=? AND ch.date=sr.date), 0) AS deposits_count,
+        COALESCE((SELECT SUM(md.amount) FROM manual_deposits md JOIN adsets a3 ON a3.id=md.adset_id WHERE ${filterCol.replace('a.','a3.')}=? AND md.date=sr.date), 0) AS deposit_amount
+      FROM spend_records sr
+      JOIN adsets a ON a.id = sr.adset_id
+      WHERE ${filterCol} = ? AND sr.date BETWEEN ? AND ?
+      GROUP BY sr.date ORDER BY sr.date
+    `).all(eid, eid, eid, fromDate, today);
+
+    result[eid] = rows.map(r => ({
+      date: r.date,
+      spend: +r.spend.toFixed(2),
+      deposit_amount: +r.deposit_amount.toFixed(2),
+      profit: +(r.deposit_amount - r.spend).toFixed(2),
+      roi: r.spend > 0 ? +((r.deposit_amount - r.spend) / r.spend * 100).toFixed(1) : 0,
+    }));
+  }
+
+  // Single id returns array, multiple returns object
+  res.json(idList.length === 1 && id ? result[idList[0]] : result);
+} catch(e) { res.status(500).json({ detail: e.message }); } });
+
 // Helper: spend SQL expression with or without agent commission
 function spendExpr(withCommission) {
   if (!withCommission) return 'sr.amount';
@@ -1085,6 +1122,10 @@ function enrichStats(r) {
     cost_reg: costPer(spend, r.registrations),
     cost_dep: costPer(spend, r.deposits_count),
     cost_redep: costPer(spend, r.redeposits_count),
+    cac: costPer(spend, r.deposits_count),
+    arpu: r.deposits_count > 0 ? +(dep / r.deposits_count).toFixed(2) : 0,
+    margin_pct: dep > 0 ? +((dep - spend) / dep * 100).toFixed(1) : 0,
+    full_conversion: r.pdp > 0 ? +(r.deposits_count / r.pdp * 100).toFixed(2) : 0,
     pct_pdp_dia: safe(r.dialogs, r.pdp),
     pct_dia_reg: safe(r.registrations, r.dialogs),
     pct_reg_dep: safe(r.deposits_count, r.registrations),
@@ -1594,11 +1635,20 @@ app.get('/api/dashboard/summary', requireAuth('admin','buyer'), (req, res) => {
     total_spend = db.prepare(`SELECT COALESCE(SUM(${se}),0) AS v FROM spend_records sr JOIN adsets a ON a.id=sr.adset_id WHERE 1=1 ${df_s}`).get(...sp).v;
     total_deposits = db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM manual_deposits WHERE 1=1 ${df_d}`).get(...sp).v;
   }
+  const todayStr = new Date().toISOString().slice(0,10);
+  const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+  const weekAgoStr = new Date(Date.now() - 7 * 86400000).toISOString().slice(0,10);
+  const spend_today = +(db.prepare('SELECT COALESCE(SUM(amount),0) AS v FROM spend_records WHERE date = ?').get(todayStr).v).toFixed(2);
+  const spend_yesterday = +(db.prepare('SELECT COALESCE(SUM(amount),0) AS v FROM spend_records WHERE date = ?').get(yesterdayStr).v).toFixed(2);
+  const spend_7d = +(db.prepare('SELECT COALESCE(SUM(amount),0) AS v FROM spend_records WHERE date BETWEEN ? AND ?').get(weekAgoStr, todayStr).v).toFixed(2);
+  const spend_7d_avg = +(spend_7d / 7).toFixed(2);
   res.json({
     total_spend: +total_spend.toFixed(2),
     total_deposits: +total_deposits.toFixed(2),
     profit: +(total_deposits - total_spend).toFixed(2),
     roi: total_spend > 0 ? +((total_deposits - total_spend) / total_spend * 100).toFixed(1) : 0,
+    spend_today, spend_yesterday, spend_7d_avg,
+    burn_rate: spend_7d_avg > 0 ? +(spend_today / spend_7d_avg * 100).toFixed(1) : 0,
   });
 });
 
@@ -1888,7 +1938,7 @@ function checkBudgets() {
     }
 
     const pct = b.amount > 0 ? +(spent / b.amount * 100).toFixed(1) : 0;
-    return { ...b, entity_name: b.entity_name, current_spend: +spent.toFixed(2), pct, alert: pct >= 80 };
+    return { ...b, entity_name: b.entity_name, current_spend: +spent.toFixed(2), pct, alert: pct >= 80, variance_pct: b.amount > 0 ? +((spent - b.amount) / b.amount * 100).toFixed(1) : 0 };
   });
 }
 
