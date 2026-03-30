@@ -77,6 +77,14 @@ function restoreNavGroups() {
   });
 }
 
+// ─── XSS ESCAPE ──────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 
 function getToken() {
@@ -116,7 +124,7 @@ function toast(msg, type = 'success') {
   const t = document.createElement('div');
   t.className = 'crm-toast';
   t.style.setProperty('--toast-color', colors[type] || colors.info);
-  t.innerHTML = `<div class="crm-toast-body"><i class="bi bi-${icons[type]||icons.info}" style="color:${colors[type]||colors.info};font-size:1.1rem"></i><span>${msg}</span><button class="crm-toast-close" onclick="this.parentElement.parentElement.remove()">&times;</button></div><div class="crm-toast-progress"></div>`;
+  t.innerHTML = `<div class="crm-toast-body"><i class="bi bi-${icons[type]||icons.info}" style="color:${colors[type]||colors.info};font-size:1.1rem"></i><span>${esc(msg)}</span><button class="crm-toast-close" onclick="this.parentElement.parentElement.remove()">&times;</button></div><div class="crm-toast-progress"></div>`;
   container.appendChild(t);
   requestAnimationFrame(() => t.classList.add('show'));
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3500);
@@ -349,12 +357,12 @@ async function loadState() {
 }
 
 function refreshAllSelects() {
-  const geoOpts = state.geos.map(g => `<option value="${g.id}">${g.name} (${g.abbreviation})</option>`).join('');
+  const geoOpts = state.geos.map(g => `<option value="${g.id}">${esc(g.name)} (${esc(g.abbreviation)})</option>`).join('');
   const geoOptsAll = `<option value="">Все гео</option>` + geoOpts;
   const geoOptsSel = `<option value="">— выберите гео —</option>` + geoOpts;
 
   // Various geo selects
-  setSelectOpts('creativeGeoFilter', `<option value="">Все гео</option>` + state.geos.map(g => `<option value="${g.id}">${g.name}</option>`).join(''));
+  setSelectOpts('creativeGeoFilter', `<option value="">Все гео</option>` + state.geos.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join(''));
   setSelectOpts('statsGeoFilter', geoOptsAll);
   setSelectOpts('depHistGeo', geoOptsAll);
   setSelectOpts('opHistGeo', geoOptsAll);
@@ -362,7 +370,7 @@ function refreshAllSelects() {
   setSelectOpts('creativeGeoId', `<option value="">Без гео</option>` + geoOpts);
   setSelectOpts('adsetGeoId', `<option value="">Автоопределение</option>` + geoOpts);
   setSelectOpts('adsetAgentId', `<option value="">Автоопределение</option>` +
-    state.agents.map(a => `<option value="${a.id}">${a.name} (${a.abbreviation})</option>`).join(''));
+    state.agents.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.abbreviation)})</option>`).join(''));
 }
 
 function setSelectOpts(id, html) {
@@ -601,8 +609,8 @@ App.Geos = {
     const tb = document.getElementById('geoTbody');
     tb.innerHTML = rows.map(g => `<tr>
       <td><input type="checkbox" class="form-check-input geo-check" value="${g.id}" onchange="App.Geos.onCheck()"></td>
-      <td>${g.name}</td>
-      <td><span class="badge bg-secondary">${g.abbreviation}</span></td>
+      <td>${esc(g.name)}</td>
+      <td><span class="badge bg-secondary">${esc(g.abbreviation)}</span></td>
       <td class="text-end">
         ${btnIcon('pencil','Редактировать',`App.Geos.openEdit(${g.id})`)}
         ${btnIcon('trash','Удалить',`App.Geos.del(${g.id})`,true)}
@@ -670,8 +678,8 @@ App.Agents = {
     const tb = document.getElementById('agentTbody');
     tb.innerHTML = rows.map(a => `<tr>
       <td><input type="checkbox" class="form-check-input agent-check" value="${a.id}" onchange="App.Agents.onCheck()"></td>
-      <td>${a.name}</td>
-      <td><span class="badge bg-secondary">${a.abbreviation}</span></td>
+      <td>${esc(a.name)}</td>
+      <td><span class="badge bg-secondary">${esc(a.abbreviation)}</span></td>
       <td class="text-end stat-number">${fmt(a.current_commission,1)}%</td>
       <td>${a.commissions?.[0]?.effective_from || '—'}</td>
       <td class="text-end">
@@ -747,8 +755,8 @@ App.Creatives = {
     c.innerHTML = list.map(cr => `
       <div class="creative-block">
         <div class="creative-header">
-          <span class="fw-semibold">${cr.name}</span>
-          ${cr.geo_name ? `<span class="badge bg-secondary ms-1">${cr.geo_name}</span>` : ''}
+          <span class="fw-semibold">${esc(cr.name)}</span>
+          ${cr.geo_name ? `<span class="badge bg-secondary ms-1">${esc(cr.geo_name)}</span>` : ''}
           <div class="ms-auto d-flex gap-1">
             ${btnIcon('plus-lg','Добавить адсет',`App.Adsets.openAddToCreative(${cr.id})`)}
             ${btnIcon('pencil','Редактировать',`App.Creatives.openEdit(${cr.id})`)}
@@ -758,8 +766,8 @@ App.Creatives = {
         <div class="creative-adsets">
           ${cr.adsets?.length ? cr.adsets.map(a => `
             <span class="adset-tag ${a.is_undefined?'undefined-adset':''}">
-              <i class="bi bi-tag" style="font-size:.65rem"></i>${a.name}
-              ${a.geo_name?`<span style="font-size:.65rem;opacity:.6">(${a.geo_name})</span>`:''}
+              <i class="bi bi-tag" style="font-size:.65rem"></i>${esc(a.name)}
+              ${a.geo_name?`<span style="font-size:.65rem;opacity:.6">(${esc(a.geo_name)})</span>`:''}
               <span class="remove-adset" onclick="App.Adsets.unlink(${a.id})" title="Открепить">×</span>
             </span>`).join('') : '<span class="text-muted small">Нет адсетов</span>'}
         </div>
@@ -792,7 +800,7 @@ App.Creatives = {
   },
   openBulkAdd() {
     const sel = document.getElementById('bulkCreativeGeo');
-    sel.innerHTML = state.geos.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+    sel.innerHTML = state.geos.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
     document.getElementById('bulkCreativeNames').value = '';
     new bootstrap.Modal(document.getElementById('bulkCreativeModal')).show();
   },
@@ -819,7 +827,7 @@ App.Adsets = {
       const users = await apiFetch('/api/users');
       const buyers = users.filter(u => u.role === 'buyer');
       const sel = document.getElementById('adsetBuyerId');
-      sel.innerHTML = `<option value="">Не назначен</option>` + buyers.map(b => `<option value="${b.id}"${b.id===selectedId?' selected':''}>${b.username}</option>`).join('');
+      sel.innerHTML = `<option value="">Не назначен</option>` + buyers.map(b => `<option value="${b.id}"${b.id===selectedId?' selected':''}>${esc(b.username)}</option>`).join('');
     } catch { /* non-admin won't see users, that's ok */ }
   },
   async openAddToCreative(creativeId) {
@@ -828,7 +836,7 @@ App.Adsets = {
     document.getElementById('adsetGeoId').value = '';
     document.getElementById('adsetAgentId').value = '';
     const sel = document.getElementById('adsetCreativeId');
-    sel.innerHTML = state.creatives.map(c => `<option value="${c.id}"${c.id===creativeId?' selected':''}>${c.name}</option>`).join('');
+    sel.innerHTML = state.creatives.map(c => `<option value="${c.id}"${c.id===creativeId?' selected':''}>${esc(c.name)}</option>`).join('');
     this._loadBuyerSelect(null);
     document.getElementById('adsetModalTitle').textContent = 'Добавить адсет';
     new bootstrap.Modal('#adsetModal').show();
@@ -839,7 +847,7 @@ App.Adsets = {
     document.getElementById('adsetGeoId').value = data.geo_id||'';
     document.getElementById('adsetAgentId').value = data.agent_id||'';
     const sel = document.getElementById('adsetCreativeId');
-    sel.innerHTML = `<option value="">Не привязан</option>` + state.creatives.map(c => `<option value="${c.id}"${c.id===data.creative_id?' selected':''}>${c.name}</option>`).join('');
+    sel.innerHTML = `<option value="">Не привязан</option>` + state.creatives.map(c => `<option value="${c.id}"${c.id===data.creative_id?' selected':''}>${esc(c.name)}</option>`).join('');
     document.getElementById('adsetCreativeId').value = data.creative_id||'';
     this._loadBuyerSelect(data.buyer_id);
     document.getElementById('adsetModalTitle').textContent = 'Редактировать адсет';
@@ -897,13 +905,13 @@ App.Undefined = {
     }
     tb.innerHTML = this.data.map(a => {
       const geoCreatives = (this._creatives || []).filter(c => c.geo_id == a.geo_id);
-      const creativeOptions = geoCreatives.map(c => `<option value="${c.id}" ${c.id==a.creative_id?'selected':''}>${c.name}</option>`).join('');
+      const creativeOptions = geoCreatives.map(c => `<option value="${c.id}" ${c.id==a.creative_id?'selected':''}>${esc(c.name)}</option>`).join('');
       const canAssignCreative = a.geo_id && a.agent_id;
       return `<tr data-adset-id="${a.id}">
       <td><input type="checkbox" class="form-check-input undef-check" value="${a.id}" onchange="App.Undefined.onCheck()"></td>
-      <td class="undefined-adset font-monospace">${a.name}</td>
-      <td>${a.geo_name||'<span class="text-muted">—</span>'}</td>
-      <td>${a.agent_name||'<span class="text-muted">—</span>'}</td>
+      <td class="undefined-adset font-monospace">${esc(a.name)}</td>
+      <td>${a.geo_name?esc(a.geo_name):'<span class="text-muted">—</span>'}</td>
+      <td>${a.agent_name?esc(a.agent_name):'<span class="text-muted">—</span>'}</td>
       <td>${canAssignCreative
         ? `<select class="form-select form-select-sm" style="width:140px" onchange="App.Undefined.assignCreative(${a.id}, this.value)">
         <option value="">—</option>${creativeOptions}
@@ -1099,7 +1107,7 @@ App.Stats = {
       const agentSel = document.getElementById('statsAgentFilter');
       if (agentSel && window.state?.agents) {
         const val = agentSel.value;
-        agentSel.innerHTML = '<option value="">Все агенты</option>' + window.state.agents.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+        agentSel.innerHTML = '<option value="">Все агенты</option>' + window.state.agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
         agentSel.value = val;
       }
       this.render(this.data);
@@ -1253,7 +1261,7 @@ App.Stats = {
   fmtCell(col, val) {
     const v = val ?? 0;
     switch(col.type) {
-      case 'text': return v || '—';
+      case 'text': return v ? esc(v) : '—';
       case 'int': return fmtInt(v);
       case 'usd': return v > 0 ? `$${fmt(v)}` : '<span class="text-muted">—</span>';
       case 'pct': return v > 0 ? `${fmt(v,1)}%` : '<span class="text-muted">—</span>';
@@ -1515,7 +1523,7 @@ App.Stats = {
       rows.sort((a, b) => dir === -1 ? (b[key]||0) - (a[key]||0) : (a[key]||0) - (b[key]||0));
     }
     tbody.innerHTML = rows.map(r =>
-      `<tr><td class="fw-medium" style="white-space:nowrap">${r.adset||'—'}</td>${this._drillValueCols.map(c => `<td class="${c.align} stat-number">${this.fmtCell(c, r[c.key])}</td>`).join('')}</tr>`
+      `<tr><td class="fw-medium" style="white-space:nowrap">${r.adset?esc(r.adset):'—'}</td>${this._drillValueCols.map(c => `<td class="${c.align} stat-number">${this.fmtCell(c, r[c.key])}</td>`).join('')}</tr>`
     ).join('');
   },
 };
@@ -1565,7 +1573,7 @@ App.Deposits = {
       const dl = document.getElementById('adsetDatalist');
       dl.innerHTML = adsets.map(a => {
         this._adsetMap[a.name] = { id: a.id, geo_name: a.geo_name || '', creative_name: a.creative_name || '' };
-        return `<option value="${a.name.replace(/"/g,'&quot;')}">`;
+        return `<option value="${esc(a.name)}">`;
       }).join('');
     } catch {}
   },
@@ -1592,7 +1600,7 @@ App.Deposits = {
     try {
       const geoIds = await apiFetch(`/api/users/${user.id}/geos`);
       const myGeos = state.geos.filter(g => geoIds.includes(g.id));
-      const geoOpts = myGeos.map(g => `<option value="${g.id}">${g.name} (${g.abbreviation})</option>`).join('');
+      const geoOpts = myGeos.map(g => `<option value="${g.id}">${esc(g.name)} (${esc(g.abbreviation)})</option>`).join('');
       const allOpts = `<option value="">Все гео</option>` + geoOpts;
       const filterOpts = `<option value="">— гео —</option>` + geoOpts;
       const opGeoFilter = document.getElementById('opGeoFilter');
@@ -1718,8 +1726,8 @@ App.Deposits = {
     if (isOperator) {
       let html = allRows.map(r => `<tr>
         <td>${r.date}</td>
-        <td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
-        <td>${r.geo_name||'—'}</td>
+        <td class="font-monospace" style="font-size:.78rem">${esc(r.adset_name)}</td>
+        <td>${r.geo_name?esc(r.geo_name):'—'}</td>
         <td>${depTypeBadge(r.type)}</td>
         <td class="text-end stat-number fw-semibold">${isPending(r) ? '<span class="text-muted">—</span>' : '$'+fmt(r.amount)}</td>
         <td>${isPending(r) ? '<span class="badge bg-warning text-dark">Pending</span>' : '<span class="badge bg-success">Подтверждён</span>'}</td>
@@ -1733,13 +1741,13 @@ App.Deposits = {
         const canDel = !isBuyer || (isPending(r) && r.created_by === me?.id);
         return `<tr>
         <td>${r.date}</td>
-        <td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
-        <td>${r.creative_name||'—'}</td>
-        <td>${r.geo_name||'—'}</td>
+        <td class="font-monospace" style="font-size:.78rem">${esc(r.adset_name)}</td>
+        <td>${r.creative_name?esc(r.creative_name):'—'}</td>
+        <td>${r.geo_name?esc(r.geo_name):'—'}</td>
         <td>${depTypeBadge(r.type)}</td>
         <td class="text-end stat-number fw-semibold">${isPending(r) ? '<span class="text-muted">—</span>' : '$'+fmt(r.amount)}</td>
         <td>${isPending(r) ? '<span class="badge bg-warning text-dark">Pending</span>' : '<span class="badge bg-success">Подтверждён</span>'}</td>
-        <td>${r.agent_name||'—'}</td>
+        <td>${r.agent_name?esc(r.agent_name):'—'}</td>
         <td>${canDel ? btnIcon('trash','Удалить',`App.Deposits.del(${r.id})`,true) : ''}</td>
       </tr>`;
       }).join('');
@@ -1858,9 +1866,9 @@ App.Import = {
     const cabs = await apiFetch('/api/cabinets');
     const sel = document.getElementById('spendCabinet');
     sel.innerHTML = '<option value="">Без кабинета</option>' +
-      cabs.map(c=>`<option value="${c.id}">${c.name} (${c.account_id})</option>`).join('');
+      cabs.map(c=>`<option value="${c.id}">${esc(c.name)} (${esc(c.account_id)})</option>`).join('');
     const fbSel = document.getElementById('fbCabinet');
-    fbSel.innerHTML = cabs.filter(c => c.access_token).map(c => `<option value="${c.id}">${c.name} (${c.account_id})</option>`).join('') || '<option value="">Нет кабинетов с токеном</option>';
+    fbSel.innerHTML = cabs.filter(c => c.access_token).map(c => `<option value="${c.id}">${esc(c.name)} (${esc(c.account_id)})</option>`).join('') || '<option value="">Нет кабинетов с токеном</option>';
     // Restore FBTool fields from localStorage
     const savedKey = localStorage.getItem('fbtool_api_key');
     const savedAccounts = localStorage.getItem('fbtool_accounts');
@@ -1909,8 +1917,8 @@ App.Import = {
     this._spendOffset += rows.length;
     const tb = document.getElementById('spendHistTbody');
     let html = this._spendRows.map(r=>`<tr>
-      <td>${r.date}</td><td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
-      <td>${r.creative_name||'—'}</td><td>${r.geo_name||'—'}</td>
+      <td>${r.date}</td><td class="font-monospace" style="font-size:.78rem">${esc(r.adset_name)}</td>
+      <td>${r.creative_name?esc(r.creative_name):'—'}</td><td>${r.geo_name?esc(r.geo_name):'—'}</td>
       <td class="text-end stat-number">$${fmt(r.amount)}</td>
       <td>${btnIcon('trash','Удалить',`App.Import.delSpend(${r.id})`,true)}</td></tr>`).join('');
     if (!html) html = '<tr><td colspan="6" class="text-center text-muted py-3">Нет записей</td></tr>';
@@ -1972,7 +1980,7 @@ App.Import = {
     this._chatterfyOffset += rows.length;
     const tb = document.getElementById('chatterfyHistTbody');
     let html = this._chatterfyRows.map(r=>`<tr>
-      <td>${r.date}</td><td class="font-monospace" style="font-size:.78rem">${r.adset_name}</td>
+      <td>${r.date}</td><td class="font-monospace" style="font-size:.78rem">${esc(r.adset_name)}</td>
       <td class="text-end">${fmtInt(r.pdp)}</td><td class="text-end">${fmtInt(r.dialogs)}</td>
       <td class="text-end">${fmtInt(r.registrations)}</td><td class="text-end">${fmtInt(r.deposits)}</td>
       <td class="text-end">${fmtInt(r.redeposits)}</td>
@@ -2082,7 +2090,7 @@ App.Cabinets = {
     this.data = await apiFetch('/api/cabinets');
     const tb = document.getElementById('cabinetTbody');
     tb.innerHTML = this.data.map(c=>`<tr>
-      <td>${c.name}</td><td class="font-monospace">${c.account_id}</td>
+      <td>${esc(c.name)}</td><td class="font-monospace">${esc(c.account_id)}</td>
       <td class="text-muted">${c.access_token?'••••••••':'—'}</td>
       <td class="text-end">
         ${btnIcon('pencil','Редактировать',`App.Cabinets.openEdit(${c.id})`)}
@@ -2130,8 +2138,8 @@ App.Users = {
         ? u.geo_ids.map(id => state.geos.find(g => g.id === id)?.abbreviation || id).join(', ')
         : '';
       return `<tr>
-        <td><i class="bi bi-person me-1 text-secondary"></i>${u.username}${u.id===me?.id?' <span class="badge bg-secondary">я</span>':''}</td>
-        <td>${roleBadge(u.role)}${geoNames ? `<span class="ms-1 text-muted small">${geoNames}</span>` : ''}</td>
+        <td><i class="bi bi-person me-1 text-secondary"></i>${esc(u.username)}${u.id===me?.id?' <span class="badge bg-secondary">я</span>':''}</td>
+        <td>${roleBadge(u.role)}${geoNames ? `<span class="ms-1 text-muted small">${esc(geoNames)}</span>` : ''}</td>
         <td class="text-muted small">${u.created_at?.slice(0,10)||'—'}</td>
         <td class="text-end">
           ${btnIcon('pencil','Редактировать',`App.Users.openEdit(${u.id})`)}
@@ -2143,7 +2151,7 @@ App.Users = {
     const sel = document.getElementById('userGeos');
     if (!sel) return;
     sel.innerHTML = state.geos.map(g =>
-      `<option value="${g.id}"${selectedIds.includes(g.id)?' selected':''}>${g.name} (${g.abbreviation})</option>`
+      `<option value="${g.id}"${selectedIds.includes(g.id)?' selected':''}>${esc(g.name)} (${esc(g.abbreviation)})</option>`
     ).join('');
   },
   onRoleChange() {
@@ -2296,8 +2304,8 @@ App.Dashboard = {
     try {
       const buyers = await apiFetch(`/api/dashboard/buyers${qs}`);
       let buyersHtml = buyers.map(r => `<tr>
-        <td class="fw-medium">${r.buyer}</td>
-        <td class="text-muted small">${r.agency_name||'—'}</td>
+        <td class="fw-medium">${esc(r.buyer)}</td>
+        <td class="text-muted small">${r.agency_name?esc(r.agency_name):'—'}</td>
         <td class="text-end">${r.adset_count}</td>
         <td class="text-end stat-number">$${fmt(r.spend)}</td>
         <td class="text-end stat-number">${fmtInt(r.deposits_count)}</td>
@@ -2319,7 +2327,7 @@ App.Dashboard = {
     try {
       const ops = await apiFetch(`/api/dashboard/operators${qs}`);
       let opsHtml = ops.map(r => `<tr>
-        <td><i class="bi bi-person me-1 text-muted"></i>${r.username}</td>
+        <td><i class="bi bi-person me-1 text-muted"></i>${esc(r.username)}</td>
         <td class="text-end stat-number">${r.count_dep}</td>
         <td class="text-end stat-number">${r.count_redep}</td>
         <td class="text-end stat-number fw-semibold">$${fmt(r.total_amount)}</td>
@@ -2410,16 +2418,16 @@ App.Dashboard = {
     if (!cats.length) { el.innerHTML = '<p class="text-muted small mb-0 p-1">Нет данных</p>'; return; }
     el.innerHTML = cats.map(c => {
       const isExp = c.type === 'expense';
-      return `<div class="d-flex align-items-center gap-2 py-1 px-1" style="font-size:.8rem;cursor:pointer" onclick="document.getElementById('plCatFilter').value='${c.name}';App.Dashboard.filterPL(App.Dashboard._plFilter)">
+      return `<div class="d-flex align-items-center gap-2 py-1 px-1" style="font-size:.8rem;cursor:pointer" onclick="document.getElementById('plCatFilter').value='${esc(c.name)}';App.Dashboard.filterPL(App.Dashboard._plFilter)">
         <span class="badge ${isExp?'bg-danger':'bg-success'}" style="font-size:.6rem;width:14px;height:14px;padding:0"></span>
-        <span class="flex-grow-1 text-truncate">${c.name}</span>
+        <span class="flex-grow-1 text-truncate">${esc(c.name)}</span>
         <span class="fw-semibold ${isExp?'text-danger':'text-success'}">$${fmt(c.total)}</span>
       </div>`;
     }).join('');
     // Populate category filter dropdown
     const sel = document.getElementById('plCatFilter');
     const val = sel.value;
-    sel.innerHTML = '<option value="">Все категории</option>' + cats.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+    sel.innerHTML = '<option value="">Все категории</option>' + cats.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
     sel.value = val;
   },
 
@@ -2490,7 +2498,7 @@ App.Dashboard = {
       }
     }
     const sorted = [...items].sort();
-    unitSel.innerHTML = '<option value="">Все подстатьи</option>' + sorted.map(n => `<option value="${n}">${n}</option>`).join('');
+    unitSel.innerHTML = '<option value="">Все подстатьи</option>' + sorted.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
     unitSel.value = '';
   },
 
@@ -2527,8 +2535,8 @@ App.Dashboard = {
       return `<tr>
         <td class="text-muted small">${e.date}</td>
         <td>${badge}</td>
-        <td class="fw-medium">${e.catName}</td>
-        <td>${e.itemName}${e.notes ? '<div class="text-muted small" style="font-size:.7rem">'+e.notes+'</div>' : ''}</td>
+        <td class="fw-medium">${esc(e.catName)}</td>
+        <td>${esc(e.itemName)}${e.notes ? '<div class="text-muted small" style="font-size:.7rem">'+esc(e.notes)+'</div>' : ''}</td>
         <td class="text-end stat-number fw-semibold ${isInc?'text-success':'text-danger'}">${isInc?'+':'-'}$${fmt(e.amount)}</td>
         <td>${e.id ? btnIcon('trash','Удалить',`App.Expenses.del(${e.id})`,true) : ''}</td>
       </tr>`;
@@ -2652,7 +2660,7 @@ App.Expenses = {
     const cats = this._cats.filter(c => c.type === type);
     const sel = document.getElementById('expenseCatSelect');
     sel.innerHTML = '<option value="">-- выберите категорию --</option>' +
-      cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
     document.getElementById('expenseItemSelect').innerHTML = '<option value="">-- выберите подстатью --</option>';
   },
   onCatChange() {
@@ -2664,7 +2672,7 @@ App.Expenses = {
       return;
     }
     sel.innerHTML = '<option value="">-- выберите подстатью --</option>' +
-      cat.items.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+      cat.items.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join('');
   },
   async save() {
     const id = document.getElementById('expenseId').value;
@@ -2715,9 +2723,9 @@ App.ExpCat = {
     el.innerHTML = cats.length ? cats.map(c => `
       <div class="cat-group">
         <div class="cat-group-header">
-          <i class="bi bi-tag me-1"></i>${c.name}
+          <i class="bi bi-tag me-1"></i>${esc(c.name)}
           <span class="ms-auto d-flex gap-1">
-            <button class="btn-icon" onclick="App.ExpCat.openAddItem(${c.id},'${c.name}')"><i class="bi bi-plus-lg"></i></button>
+            <button class="btn-icon" onclick="App.ExpCat.openAddItem(${c.id},'${esc(c.name)}')"><i class="bi bi-plus-lg"></i></button>
             ${btnIcon('pencil','Ред.',`App.ExpCat.openEditCat(${c.id})`)}
             ${btnIcon('trash','Удалить',`App.ExpCat.deleteCat(${c.id})`,true)}
           </span>
@@ -2726,8 +2734,8 @@ App.ExpCat = {
           ${c.items.length ? c.items.map(i => `
             <div class="cat-item">
               <i class="bi bi-dot text-muted"></i>
-              <span class="flex-grow-1">${i.name}</span>
-              ${btnIcon('pencil','Ред.',`App.ExpCat.openEditItem(${i.id},${c.id},'${i.name}')`)}
+              <span class="flex-grow-1">${esc(i.name)}</span>
+              ${btnIcon('pencil','Ред.',`App.ExpCat.openEditItem(${i.id},${c.id},'${esc(i.name)}')`)}
               ${btnIcon('trash','Удалить',`App.ExpCat.deleteItem(${i.id})`,true)}
             </div>`).join('') : '<p class="text-muted small mb-0 ps-2">Нет подстатей</p>'}
         </div>
@@ -2951,9 +2959,9 @@ App.ActivityLog = {
         <th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th>
       </tr></thead><tbody>${this._rows.map(r => `<tr>
         <td class="text-muted small">${r.created_at}</td>
-        <td class="fw-medium">${r.username}</td>
-        <td><span class="badge bg-secondary" style="font-size:.65rem">${r.action}</span></td>
-        <td class="small">${r.details || '—'}</td>
+        <td class="fw-medium">${esc(r.username)}</td>
+        <td><span class="badge bg-secondary" style="font-size:.65rem">${esc(r.action)}</span></td>
+        <td class="small">${esc(r.details) || '—'}</td>
       </tr>`).join('')}${loadMore}</tbody></table></div>`;
     } catch {
       document.getElementById('activityLogContent').innerHTML = '<div class="text-center py-5"><i class="bi bi-clock-history" style="font-size:2.5rem;color:var(--text-muted);opacity:.3"></i><p class="text-muted mt-2">Нет записей в журнале</p></div>';
@@ -2998,8 +3006,8 @@ App.Deleted = {
       let html = this._delRows.map(r => `<tr>
         <td class="text-muted small">${r.deleted_at}</td>
         <td><span class="badge bg-secondary" style="font-size:.65rem">${this._typeNames[r.table_name]||r.table_name}</span></td>
-        <td class="small font-monospace" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._summary(r.table_name, r.record_data)}</td>
-        <td class="small">${r.deleted_by_name||'—'}</td>
+        <td class="small font-monospace" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(this._summary(r.table_name, r.record_data))}</td>
+        <td class="small">${r.deleted_by_name?esc(r.deleted_by_name):'—'}</td>
         <td class="text-end">
           ${btnIcon('arrow-counterclockwise','Восстановить',`App.Deleted.restore(${r.id})`)}
           ${btnIcon('x-lg','Удалить навсегда',`App.Deleted.del(${r.id})`,true)}
@@ -3009,7 +3017,7 @@ App.Deleted = {
         html += `<tr><td colspan="5" class="text-center py-2"><button class="btn btn-sm btn-outline-primary" onclick="App.Deleted.load(true)">Загрузить ещё (${remaining} записей)</button></td></tr>`;
       }
       tb.innerHTML = html;
-    } catch(e) { tb.innerHTML = `<tr><td colspan="5" class="text-danger">${e.message}</td></tr>`; }
+    } catch(e) { tb.innerHTML = `<tr><td colspan="5" class="text-danger">${esc(e.message)}</td></tr>`; }
   },
   async restore(id) {
     if (!confirm('Восстановить эту запись?')) return;
@@ -3051,10 +3059,10 @@ App.Search = {
         if (!results.length) { el.innerHTML = '<div class="search-empty">Ничего не найдено</div>'; return; }
         const typeIcons = { geo:'globe', agent:'building', creative:'brush', adset:'collection' };
         const typeLabels = { geo:'Гео', agent:'Агент', creative:'Креатив', adset:'Адсет' };
-        el.innerHTML = results.map(r => `<div class="search-result" onclick="App.Search.navigate('${r.section}','${r.dict}')">
+        el.innerHTML = results.map(r => `<div class="search-result" onclick="App.Search.navigate('${esc(r.section)}','${esc(r.dict)}')">
           <i class="bi bi-${typeIcons[r.type]||'search'}"></i>
-          <span class="flex-grow-1">${r.label}</span>
-          <span class="badge bg-secondary">${typeLabels[r.type]||r.type}</span>
+          <span class="flex-grow-1">${esc(r.label)}</span>
+          <span class="badge bg-secondary">${typeLabels[r.type]||esc(r.type)}</span>
         </div>`).join('');
       } catch { /* ignore */ }
     }, 300);

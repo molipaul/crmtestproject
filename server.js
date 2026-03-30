@@ -10,7 +10,10 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 const DB_PATH = path.join(__dirname, 'crm.db');
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : true,
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'frontend')));
 
@@ -104,8 +107,12 @@ db.exec(`
 
 // ─── MIGRATIONS (idempotent) ──────────────────────────────────────────────────
 
-try { db.exec("ALTER TABLE manual_deposits ADD COLUMN created_by INTEGER REFERENCES users(id)"); } catch {}
-try { db.exec("ALTER TABLE users ADD COLUMN agent_id INTEGER REFERENCES agents(id)"); } catch {}
+function safeMigrate(sql) {
+  try { db.exec(sql); } catch(e) { if (!e.message.includes('duplicate') && !e.message.includes('already exists')) console.error('Migration warning:', e.message); }
+}
+
+safeMigrate("ALTER TABLE manual_deposits ADD COLUMN created_by INTEGER REFERENCES users(id)");
+safeMigrate("ALTER TABLE users ADD COLUMN agent_id INTEGER REFERENCES agents(id)");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS team_expenses (
@@ -139,16 +146,16 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
-try { db.exec("ALTER TABLE team_expenses ADD COLUMN item_id INTEGER REFERENCES expense_items(id)"); } catch {}
-try { db.exec("ALTER TABLE adsets ADD COLUMN buyer_id INTEGER REFERENCES users(id)"); } catch {}
-try { db.exec("ALTER TABLE manual_deposits ADD COLUMN status TEXT DEFAULT 'confirmed'"); } catch {}
-try { db.exec("ALTER TABLE team_expenses ADD COLUMN notes TEXT"); } catch {}
-try { db.exec(`CREATE TABLE IF NOT EXISTS operator_geos (
+safeMigrate("ALTER TABLE team_expenses ADD COLUMN item_id INTEGER REFERENCES expense_items(id)");
+safeMigrate("ALTER TABLE adsets ADD COLUMN buyer_id INTEGER REFERENCES users(id)");
+safeMigrate("ALTER TABLE manual_deposits ADD COLUMN status TEXT DEFAULT 'confirmed'");
+safeMigrate("ALTER TABLE team_expenses ADD COLUMN notes TEXT");
+safeMigrate(`CREATE TABLE IF NOT EXISTS operator_geos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   geo_id INTEGER NOT NULL REFERENCES geos(id) ON DELETE CASCADE,
   UNIQUE(user_id, geo_id)
-)`); } catch {}
+)`);
 
 function getOperatorGeoIds(userId) {
   return db.prepare('SELECT geo_id FROM operator_geos WHERE user_id = ?').all(userId).map(r => r.geo_id);
@@ -170,7 +177,7 @@ try {
     db.exec("INSERT INTO adset_patterns SELECT * FROM adset_patterns_old");
     db.exec("DROP TABLE adset_patterns_old");
   }
-} catch {}
+} catch(e) { if (!e.message.includes('duplicate') && !e.message.includes('already exists')) console.error('Migration warning:', e.message); }
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS activity_log (
@@ -200,7 +207,7 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
-try { db.exec("ALTER TABLE adsets ADD COLUMN offer_id INTEGER REFERENCES offers(id)"); } catch {}
+safeMigrate("ALTER TABLE adsets ADD COLUMN offer_id INTEGER REFERENCES offers(id)");
 
 // Migration: creatives unique per geo (not globally unique name)
 // Migrate creatives: change UNIQUE(name) to UNIQUE(name, geo_id)
@@ -222,7 +229,7 @@ try {
     db.pragma('foreign_keys = ON');
   }
 } catch(e) { console.log('Creatives migration:', e.message); db.pragma('foreign_keys = ON'); }
-try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_creatives_name_geo ON creatives(name, geo_id)"); } catch {}
+safeMigrate("CREATE UNIQUE INDEX IF NOT EXISTS idx_creatives_name_geo ON creatives(name, geo_id)");
 
 // Deleted records (recycle bin)
 db.exec(`CREATE TABLE IF NOT EXISTS deleted_records (
@@ -254,7 +261,7 @@ db.exec(`
 `);
 
 function logActivity(userId, username, action, details) {
-  try { db.prepare('INSERT INTO activity_log (user_id, username, action, details) VALUES (?, ?, ?, ?)').run(userId, username, action, details || null); } catch {}
+  try { db.prepare('INSERT INTO activity_log (user_id, username, action, details) VALUES (?, ?, ?, ?)').run(userId, username, action, details || null); } catch(e) { console.error('Activity log error:', e.message); }
 }
 
 // ─── QUERY CACHE ────────────────────────────────────────────────────────────
@@ -405,7 +412,7 @@ app.put('/api/users/:id/geos', adminOnly, (req, res) => {
   db.transaction(() => {
     db.prepare('DELETE FROM operator_geos WHERE user_id = ?').run(userId);
     for (const geoId of geo_ids) {
-      try { db.prepare('INSERT INTO operator_geos (user_id, geo_id) VALUES (?, ?)').run(userId, geoId); } catch {}
+      try { db.prepare('INSERT INTO operator_geos (user_id, geo_id) VALUES (?, ?)').run(userId, geoId); } catch(e) { if (!e.message.includes('UNIQUE')) console.error('Operator geo insert error:', e.message); }
     }
   })();
   logActivity(req.user.id, req.user.username, 'set_operator_geos', `user#${userId}: [${geo_ids}]`);
@@ -415,6 +422,8 @@ app.put('/api/users/:id/geos', adminOnly, (req, res) => {
 app.post('/api/users', adminOnly, (req, res) => {
   const { username, password, role } = req.body;
   if (!username || !password || !role) return res.status(400).json({ detail: 'Заполните все поля' });
+  if (!username || username.length < 3 || username.length > 50) return err(res, 400, 'Логин должен быть от 3 до 50 символов');
+  if (!password || password.length < 6) return err(res, 400, 'Пароль минимум 6 символов');
   if (!['admin', 'buyer', 'operator'].includes(role)) return res.status(400).json({ detail: 'Неверная роль' });
   try {
     const info = createUser(username, password, role);
@@ -620,6 +629,7 @@ app.put('/api/agents/:id', adminBuyer, (req, res) => {
 
 app.post('/api/agents/:id/commissions', adminBuyer, (req, res) => {
   const { commission_pct, effective_from } = req.body;
+  if (commission_pct < 0 || commission_pct > 100) return err(res, 400, 'Комиссия должна быть от 0 до 100%');
   db.prepare('INSERT INTO agent_commissions (agent_id, commission_pct, effective_from) VALUES (?, ?, ?)').run(req.params.id, commission_pct, effective_from);
   invalidateCache('agents');
   res.json({ ok: true });
@@ -640,19 +650,24 @@ app.get('/api/creatives', anyAuth, (req, res) => {
   const cacheKey = geo_id ? `creatives:geo_${geo_id}` : 'creatives:all';
   res.json(cached(cacheKey, 120000, () => {
     let q = 'SELECT c.*, g.name as geo_name FROM creatives c LEFT JOIN geos g ON g.id = c.geo_id';
-    if (geo_id) q += ` WHERE c.geo_id = ${parseInt(geo_id)}`;
+    const params = [];
+    if (geo_id) { q += ' WHERE c.geo_id = ?'; params.push(parseInt(geo_id)); }
     q += ' ORDER BY c.name';
-    const creatives = db.prepare(q).all();
-    return creatives.map(c => {
-      const adsets = db.prepare(`
-        SELECT a.*, g.name as geo_name, ag.name as agent_name
-        FROM adsets a
-        LEFT JOIN geos g ON g.id = a.geo_id
-        LEFT JOIN agents ag ON ag.id = a.agent_id
-        WHERE a.creative_id = ? ORDER BY a.name
-      `).all(c.id);
-      return { ...c, adsets };
-    });
+    const creatives = db.prepare(q).all(...params);
+    // Fetch ALL adsets in ONE query to avoid N+1
+    const allAdsets = db.prepare(`
+      SELECT a.*, g.name as geo_name, ag.name as agent_name
+      FROM adsets a
+      LEFT JOIN geos g ON g.id = a.geo_id
+      LEFT JOIN agents ag ON ag.id = a.agent_id
+      WHERE a.creative_id IS NOT NULL ORDER BY a.name
+    `).all();
+    const adsetMap = {};
+    for (const a of allAdsets) {
+      if (!adsetMap[a.creative_id]) adsetMap[a.creative_id] = [];
+      adsetMap[a.creative_id].push(a);
+    }
+    return creatives.map(c => ({ ...c, adsets: adsetMap[c.id] || [] }));
   }));
 });
 
@@ -1889,7 +1904,7 @@ function broadcastBudgetAlerts() {
         broadcast('budget_alert', { entity: b.entity_name, pct: b.pct, limit: b.amount });
       }
     }
-  } catch {}
+  } catch(e) { console.error('Budget alert error:', e.message); }
 }
 
 // ─── ACTIVITY LOG ────────────────────────────────────────────────────────────
